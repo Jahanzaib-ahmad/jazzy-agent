@@ -1,0 +1,40 @@
+{
+  "polyfillFiles": [
+    "static/chunks/polyfills-c67a75d1b6f99dc8.js"
+  ],
+  "devFiles": [],
+  "ampDevFiles": [],
+  "lowPriorityFiles": [
+    "static/QeAb_T3WbYuP6m5Ypl3aj/_buildManifest.js",
+    "static/QeAb_T3WbYuP6m5Ypl3aj/_ssgManifest.js"
+  ],
+  "rootMainFiles": [],
+  "pages": {
+    "/": [
+      "static/chunks/webpack-4e7214a60fad8e88.js",
+      "static/chunks/framework-03cd576e71e4cd66.js",
+      "static/chunks/main-e24b4219d45d8163.js",
+      "static/chunks/pages/index-04963f1aaf83d02f.js"
+    ],
+    "/_app": [
+      "static/chunks/webpack-4e7214a60fad8e88.js",
+      "static/chunks/framework-03cd576e71e4cd66.js",
+      "static/chunks/main-e24b4219d45d8163.js",
+      "static/css/ef46db3751d8e999.css",
+      "static/chunks/pages/_app-007d776eb4d16f15.js"
+    ],
+    "/_error": [
+      "static/chunks/webpack-4e7214a60fad8e88.js",
+      "static/chunks/framework-03cd576e71e4cd66.js",
+      "static/chunks/main-e24b4219d45d8163.js",
+      "static/chunks/pages/_error-5a00309fd5f4b49e.js"
+    ],
+    "/jazzy-chat": [
+      "static/chunks/webpack-4e7214a60fad8e88.js",
+      "static/chunks/framework-03cd576e71e4cd66.js",
+      "static/chunks/main-e24b4219d45d8163.js",
+      "static/chunks/pages/jazzy-chat-7f656ce54e4cd4c5.js"
+    ]
+  },
+  "ampFirstPages": []
+}
