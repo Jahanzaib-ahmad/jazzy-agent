@@ -1,0 +1,24 @@
+{
+  "name": "jazzy-agent",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && next export",
+    "start": "next start",
+    "email-agent": "node scripts/email-agent.ts"
+  },
+  "dependencies": {
+    "firebase": "^10.14.1",
+    "next": "^14.1.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.104.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.25",
+    "@types/react": "^18.3.27",
+    "typescript": "^5.9.3"
+  }
+}
