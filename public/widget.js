@@ -20,7 +20,7 @@
   // Create iframe container
   const frame = document.createElement("iframe");
   frame.id = "jazzy-frame";
-  frame.src = "https://agent.digitalboxes.net/jazzy-chat";
+  frame.src = "https://agent.digitalboxes.net/";
   frame.style.position = "fixed";
   frame.style.bottom = "90px";
   frame.style.right = "20px";
