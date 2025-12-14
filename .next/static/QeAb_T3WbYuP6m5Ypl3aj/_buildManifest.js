@@ -1,1 +1,0 @@
-self.__BUILD_MANIFEST={__rewrites:{afterFiles:[],beforeFiles:[],fallback:[]},"/":["static/chunks/pages/index-04963f1aaf83d02f.js"],"/_error":["static/chunks/pages/_error-5a00309fd5f4b49e.js"],"/jazzy-chat":["static/chunks/pages/jazzy-chat-7f656ce54e4cd4c5.js"],sortedPages:["/","/_app","/_error","/jazzy-chat"]},self.__BUILD_MANIFEST_CB&&self.__BUILD_MANIFEST_CB();

@@ -12,12 +12,14 @@
     "firebase": "^10.14.1",
     "next": "^14.1.0",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^7.0.10",
     "openai": "^4.104.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",
+    "@types/nodemailer": "^7.0.4",
     "@types/react": "^18.3.27",
     "@types/react-dom": "^18.3.7",
     "typescript": "^5.9.3"
