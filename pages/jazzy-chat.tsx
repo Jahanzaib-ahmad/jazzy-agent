@@ -30,7 +30,6 @@ export default function JazzyChatPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [topic, setTopic] = useState<(typeof TOPICS)[number] | "">("");
-
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -45,7 +44,7 @@ export default function JazzyChatPage() {
   const [rating, setRating] = useState<number>(0);
   const [reviewText, setReviewText] = useState("");
 
-  // Scroll fix
+  // Scroll
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Turnstile
@@ -62,7 +61,7 @@ export default function JazzyChatPage() {
 
   /* ------------------------------ Close (works everywhere) ------------------------------ */
   const handleClose = () => {
-    // If inside iframe/modal: tell parent to close widget
+    // If inside iframe: tell parent to close widget
     try {
       if (window.parent && window.parent !== window) {
         window.parent.postMessage({ type: "jazzy-close" }, "*");
@@ -70,7 +69,7 @@ export default function JazzyChatPage() {
       }
     } catch {}
 
-    // Normal page: go back or go home
+    // Normal page fallback
     if (typeof window !== "undefined" && window.history.length > 1) {
       router.back();
     } else {
@@ -78,13 +77,13 @@ export default function JazzyChatPage() {
     }
   };
 
-  /* ------------------------------ Scroll ------------------------------ */
+  /* ------------------------------ Scroll fix ------------------------------ */
   useEffect(() => {
     if (!chatScrollRef.current) return;
     chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [messages, loading, showReview]);
 
-  /* ---------------------------- Turnstile ----------------------------- */
+  /* ---------------------------- Turnstile helpers ----------------------------- */
   const ensureTurnstileScript = () =>
     new Promise<void>((resolve, reject) => {
       if (typeof window === "undefined") return resolve();
@@ -163,41 +162,65 @@ export default function JazzyChatPage() {
   };
 
   useEffect(() => {
-    if (stage === "lead") {
-      void renderTurnstile();
-    }
+    if (stage === "lead") void renderTurnstile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage]);
 
-  /* ---------------------- Lead verify + greeting ----------------------- */
+  /* ---------------------- Basic lead validation ----------------------- */
+  const validateLead = () => {
+    const cleanName = name.trim().replace(/\s+/g, " ");
+    const cleanEmail = email.trim();
+
+    // Simple but solid (allows spaces, apostrophes, hyphens)
+    const nameOk = /^[A-Za-z][A-Za-z'’-]*(?: [A-Za-z][A-Za-z'’-]*){0,5}$/.test(
+      cleanName
+    );
+
+    if (!cleanName || cleanName.length < 2 || !nameOk) {
+      setError("Please enter a valid name.");
+      return false;
+    }
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setError("Please enter a valid email.");
+      return false;
+    }
+    if (!topic) {
+      setError("Please pick what you need help with.");
+      return false;
+    }
+    if (!acceptedTerms) {
+      setError("Please accept Terms & Privacy Policy to continue.");
+      return false;
+    }
+
+    return true;
+  };
+
+  /* ---------------------- Captcha verify + greeting ----------------------- */
   const verifyCaptchaAndStart = async (token: string) => {
     try {
       const r = await fetch("/api/verify-turnstile", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify({ token }),
       });
 
       const raw = await r.text();
 
-      // Prevent "<!DOCTYPE" JSON crash
       if (raw.trim().startsWith("<!DOCTYPE")) {
         console.error("[verify-turnstile] returned HTML:", raw.slice(0, 200));
-        throw new Error("Server route issue. Restart dev server.");
+        throw new Error("Server route issue. Please try again.");
       }
 
-      let j: any;
-      try {
-        j = JSON.parse(raw);
-      } catch {
-        throw new Error("Captcha error. Please try again.");
-      }
+      const j = JSON.parse(raw);
 
       if (!r.ok || !j?.success) {
-        throw new Error("Captcha failed. Please try again.");
+        throw new Error(j?.error || "Captcha failed. Please try again.");
       }
 
-      // Passed captcha -> get greeting from AI
       await startChatGreeting();
     } catch (err: any) {
       console.error(err);
@@ -219,8 +242,8 @@ export default function JazzyChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          name,
-          email,
+          name: name.trim(),
+          email: email.trim(),
           topic,
           pageUrl,
           message:
@@ -232,15 +255,10 @@ export default function JazzyChatPage() {
 
       if (raw.trim().startsWith("<!DOCTYPE")) {
         console.error("[jazzy-chat] returned HTML:", raw.slice(0, 200));
-        throw new Error("Server response issue. Please restart the dev server.");
+        throw new Error("Server response issue. Please try again.");
       }
 
-      let data: any;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        throw new Error("Invalid server response. Please try again.");
-      }
+      const data = JSON.parse(raw);
 
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || "Could not start the chat.");
@@ -263,21 +281,7 @@ export default function JazzyChatPage() {
 
   const handleContinueToChat = async () => {
     setError(null);
-
-    if (!name.trim() || !email.trim()) {
-      setError("Please add your name and email to continue.");
-      return;
-    }
-
-    if (!topic) {
-      setError("Please pick what you need help with.");
-      return;
-    }
-
-    if (!acceptedTerms) {
-      setError("Please accept Terms & Privacy Policy to continue.");
-      return;
-    }
+    if (!validateLead()) return;
 
     setLeadLoading(true);
 
@@ -290,7 +294,7 @@ export default function JazzyChatPage() {
         setLeadLoading(false);
         setError("Captcha not ready. Please try again.");
       }
-    } catch (e) {
+    } catch {
       setLeadLoading(false);
       setError("Captcha failed to load. Please refresh and try again.");
     }
@@ -315,8 +319,8 @@ export default function JazzyChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
-          name,
-          email,
+          name: name.trim(),
+          email: email.trim(),
           topic,
           pageUrl,
           message: newUserMsg.content,
@@ -327,15 +331,10 @@ export default function JazzyChatPage() {
 
       if (raw.trim().startsWith("<!DOCTYPE")) {
         console.error("[jazzy-chat] returned HTML:", raw.slice(0, 200));
-        throw new Error("Server response issue. Please restart dev server.");
+        throw new Error("Server response issue. Please try again.");
       }
 
-      let data: any;
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        throw new Error("Invalid server response. Please try again.");
-      }
+      const data = JSON.parse(raw);
 
       if (!res.ok || !data?.success) throw new Error(data?.error || "Chat error");
 
@@ -351,21 +350,25 @@ export default function JazzyChatPage() {
     }
   };
 
-  /* ------------------------------ End chat ----------------------------- */
+  /* ------------------------------ End chat + Review ----------------------------- */
   const handleEndChat = () => {
     setEnded(true);
     setShowReview(true);
   };
 
-  const submitReview = () => {
-    // Later we can POST this to an API if you want
-    console.log("Review:", { rating, reviewText, name, email, topic, pageUrl });
+  const submitReview = async () => {
+    try {
+      // Optional: send to your backend later
+      // await fetch("/api/jazzy-review", { method:"POST", headers:{...}, body: JSON.stringify(...) })
 
-    setShowReview(false);
-    setMessages((prev) => [
-      ...prev,
-      { role: "assistant", content: "Thanks for your feedback!" },
-    ]);
+      setShowReview(false);
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Thanks for your feedback!" },
+      ]);
+    } catch {
+      setShowReview(false);
+    }
   };
 
   /* ------------------------------ UI Helpers --------------------------- */
@@ -411,7 +414,6 @@ export default function JazzyChatPage() {
         ))}
       </div>
 
-      {/* Terms checkbox */}
       <label style={styles.termsRow}>
         <input
           type="checkbox"
@@ -435,7 +437,6 @@ export default function JazzyChatPage() {
         Protected by Cloudflare Turnstile. We’ll never sell your data.
       </div>
 
-      {/* Turnstile container (invisible widget renders here) */}
       <div id="cf-turnstile" style={{ marginTop: 8 }} />
 
       {error && <p style={styles.error}>{error}</p>}
@@ -505,10 +506,7 @@ export default function JazzyChatPage() {
 
       <div style={styles.chatInputRow}>
         <textarea
-          style={{
-            ...styles.chatInput,
-            opacity: ended ? 0.6 : 1,
-          }}
+          style={{ ...styles.chatInput, opacity: ended ? 0.6 : 1 }}
           rows={2}
           placeholder={ended ? "Chat ended" : "Type your question…"}
           value={currentMessage}
@@ -535,14 +533,11 @@ export default function JazzyChatPage() {
         </button>
       </div>
 
-      {/* Review Modal */}
       {showReview && (
         <div style={styles.modalOverlay}>
           <div style={styles.modalCard}>
             <div style={styles.modalTitle}>Rate your chat experience</div>
-            <div style={styles.modalSub}>
-              Your feedback helps us improve Jazzy.
-            </div>
+            <div style={styles.modalSub}>Your feedback helps us improve Jazzy.</div>
 
             <div style={styles.starsRow}>
               {[1, 2, 3, 4, 5].map((s) => (
@@ -613,7 +608,6 @@ export default function JazzyChatPage() {
       `}</style>
 
       <div style={styles.card}>
-        {/* TOP BAR */}
         <div style={styles.topBar}>
           <div style={styles.logoCircle}>DB</div>
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -622,10 +616,8 @@ export default function JazzyChatPage() {
           </div>
         </div>
 
-        {/* MAIN CONTENT */}
         {stage === "lead" ? renderLeadForm() : renderChat()}
 
-        {/* FOOTER CLOSE BUTTON */}
         <button type="button" style={styles.footerClose} onClick={handleClose}>
           Close
         </button>
@@ -684,21 +676,15 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: 11,
     opacity: 0.9,
   },
+
   content: {
     flex: 1,
-    minHeight: 0, // IMPORTANT
+    minHeight: 0,
     padding: "16px",
     overflowY: "auto",
   },
-  h2: {
-    margin: "0 0 8px",
-    fontSize: 18,
-  },
-  p: {
-    margin: "0 0 16px",
-    fontSize: 13,
-    color: "#555",
-  },
+  h2: { margin: "0 0 8px", fontSize: 18 },
+  p: { margin: "0 0 16px", fontSize: 13, color: "#555" },
   label: {
     display: "block",
     fontSize: 12,
@@ -742,16 +728,9 @@ const styles: { [key: string]: React.CSSProperties } = {
     marginTop: 10,
     color: "#333",
   },
-  link: {
-    color: "#0d5bd8",
-    textDecoration: "underline",
-    fontWeight: 500,
-  },
-  smallLine: {
-    fontSize: 11,
-    color: "#666",
-    marginTop: 6,
-  },
+  link: { color: "#0d5bd8", textDecoration: "underline", fontWeight: 500 },
+  smallLine: { fontSize: 11, color: "#666", marginTop: 6 },
+
   primaryButton: {
     width: "100%",
     borderRadius: 999,
@@ -763,11 +742,8 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontWeight: 600,
     fontSize: 14,
   },
-  error: {
-    marginTop: 8,
-    color: "#d33",
-    fontSize: 12,
-  },
+  error: { marginTop: 8, color: "#d33", fontSize: 12 },
+
   footerClose: {
     border: "none",
     borderTop: "1px solid #eef0f5",
@@ -780,7 +756,7 @@ const styles: { [key: string]: React.CSSProperties } = {
 
   chatWrapper: {
     flex: 1,
-    minHeight: 0, // IMPORTANT
+    minHeight: 0,
     display: "flex",
     flexDirection: "column",
     padding: "10px 12px",
@@ -804,14 +780,8 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: 12,
     fontWeight: 600,
   },
-  headerTitle: {
-    fontSize: 13,
-    fontWeight: 600,
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    color: "#777",
-  },
+  headerTitle: { fontSize: 13, fontWeight: 600 },
+  headerSubtitle: { fontSize: 11, color: "#777" },
   endChatBtn: {
     borderRadius: 999,
     border: "1px solid #dde2eb",
@@ -822,7 +792,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   chatMessages: {
     flex: 1,
-    minHeight: 0, // IMPORTANT (this fixes hidden messages)
+    minHeight: 0,
     overflowY: "auto",
     paddingRight: 4,
     marginBottom: 8,
@@ -868,7 +838,6 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: 13,
   },
 
-  // Modal
   modalOverlay: {
     position: "fixed",
     inset: 0,
@@ -887,27 +856,10 @@ const styles: { [key: string]: React.CSSProperties } = {
     boxShadow: "0 18px 45px rgba(0,0,0,0.20)",
     padding: 16,
   },
-  modalTitle: {
-    fontSize: 15,
-    fontWeight: 700,
-  },
-  modalSub: {
-    fontSize: 12,
-    color: "#666",
-    marginTop: 4,
-  },
-  starsRow: {
-    display: "flex",
-    gap: 6,
-    marginTop: 10,
-    fontSize: 22,
-  },
-  starBtn: {
-    border: "none",
-    background: "transparent",
-    cursor: "pointer",
-    padding: 0,
-  },
+  modalTitle: { fontSize: 15, fontWeight: 700 },
+  modalSub: { fontSize: 12, color: "#666", marginTop: 4 },
+  starsRow: { display: "flex", gap: 6, marginTop: 10, fontSize: 22 },
+  starBtn: { border: "none", background: "transparent", cursor: "pointer", padding: 0 },
   modalTextarea: {
     width: "100%",
     marginTop: 10,
@@ -918,11 +870,7 @@ const styles: { [key: string]: React.CSSProperties } = {
     outline: "none",
     resize: "none",
   },
-  modalActions: {
-    display: "flex",
-    gap: 8,
-    marginTop: 12,
-  },
+  modalActions: { display: "flex", gap: 8, marginTop: 12 },
   modalSecondary: {
     flex: 1,
     borderRadius: 999,
