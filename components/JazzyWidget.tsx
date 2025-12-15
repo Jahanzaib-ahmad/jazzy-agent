@@ -29,7 +29,7 @@ function validateEmail(raw: string) {
   return { ok, value: email, error: ok ? "" : "Enter a valid email" };
 }
 
-/** Phone validation (8–15 digits, allows + and separators) */
+/** Phone validation (8–15 digits) */
 function validatePhone(raw: string) {
   const phone = (raw ?? "").trim();
   const digitsOnly = phone.replace(/[^\d]/g, "");
@@ -86,9 +86,7 @@ const JazzyWidget: React.FC = () => {
   const turnstileWidgetIdRef = useRef<string | null>(null);
   const turnstileRenderedRef = useRef(false);
 
-  /* ----------------------------------------------------------------------
-    SPEECH RECOGNITION
-  ---------------------------------------------------------------------- */
+  /* ---------------- Speech recognition ---------------- */
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -109,20 +107,15 @@ const JazzyWidget: React.FC = () => {
     recognitionRef.current = recognition;
   }, []);
 
-  /* ----------------------------------------------------------------------
-    AUTO SCROLL CHAT
-  ---------------------------------------------------------------------- */
+  /* ---------------- Auto scroll chat ---------------- */
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
-  /* ----------------------------------------------------------------------
-    LOAD TURNSTILE SCRIPT (ONCE)
-  ---------------------------------------------------------------------- */
+  /* ---------------- Load Turnstile script (on demand) ---------------- */
   const ensureTurnstileScript = () =>
     new Promise<void>((resolve, reject) => {
       if (typeof window === "undefined") return resolve();
-
       if (window.turnstile) return resolve();
 
       const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`);
@@ -151,9 +144,7 @@ const JazzyWidget: React.FC = () => {
       document.head.appendChild(script);
     });
 
-  /* ----------------------------------------------------------------------
-    RENDER TURNSTILE WIDGET (INVISIBLE)
-  ---------------------------------------------------------------------- */
+  /* ---------------- Render Turnstile widget (only when user clicks) ---------------- */
   const renderTurnstile = async () => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -170,7 +161,7 @@ const JazzyWidget: React.FC = () => {
         return;
       }
 
-      // Render only once per widget open
+      // If already rendered, do nothing (we will execute by ID)
       if (turnstileRenderedRef.current && turnstileWidgetIdRef.current) return;
 
       const container = document.getElementById("cf-turnstile");
@@ -202,20 +193,7 @@ const JazzyWidget: React.FC = () => {
     } catch {}
   };
 
-  /* ----------------------------------------------------------------------
-    WHEN MODAL OPENS, PREP TURNSTILE
-  ---------------------------------------------------------------------- */
-  useEffect(() => {
-    if (open && leadGate) {
-      setLeadError("");
-      renderTurnstile();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, leadGate]);
-
-  /* ----------------------------------------------------------------------
-    LOCAL LEAD VALIDATION
-  ---------------------------------------------------------------------- */
+  /* ---------------- Local lead validation ---------------- */
   const validateLeadLocal = () => {
     const n = validateName(leadName);
     if (!n.ok) return { ok: false as const, error: n.error };
@@ -223,16 +201,12 @@ const JazzyWidget: React.FC = () => {
     const e = validateEmail(leadEmail);
     if (!e.ok) return { ok: false as const, error: e.error };
 
-    if (isDisposableEmail(e.value)) {
-      return { ok: false as const, error: "Disposable emails are not allowed." };
-    }
+    if (isDisposableEmail(e.value)) return { ok: false as const, error: "Disposable emails are not allowed." };
 
     const p = validatePhone(leadPhone);
     if (!p.ok) return { ok: false as const, error: p.error };
 
-    if (!acceptedTerms) {
-      return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
-    }
+    if (!acceptedTerms) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
 
     // normalize stored values
     if (leadName !== n.value) setLeadName(n.value);
@@ -242,9 +216,7 @@ const JazzyWidget: React.FC = () => {
     return { ok: true as const };
   };
 
-  /* ----------------------------------------------------------------------
-    TURNSTILE SERVER CHECK THEN OPEN CHAT
-  ---------------------------------------------------------------------- */
+  /* ---------------- Server captcha verify then open chat ---------------- */
   const validateLead = async (token: string) => {
     setLeadError("");
 
@@ -281,7 +253,7 @@ const JazzyWidget: React.FC = () => {
         return;
       }
 
-      // ✅ Open chat
+      // ✅ Success
       setLeadGate(false);
 
       const fn = firstNameFrom(leadName);
@@ -300,9 +272,7 @@ Hello ${fn || "there"}! How can I help you today?`,
     }
   };
 
-  /* ----------------------------------------------------------------------
-    SEND MESSAGE TO API (WITH HISTORY ✅)
-  ---------------------------------------------------------------------- */
+  /* ---------------- Send message to API (with history to stop repeats) ---------------- */
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
@@ -358,9 +328,6 @@ Hello ${fn || "there"}! How can I help you today?`,
     }
   };
 
-  /* ----------------------------------------------------------------------
-    MIC
-  ---------------------------------------------------------------------- */
   const toggleMic = () => {
     if (!recognitionRef.current) return;
     if (listening) recognitionRef.current.stop();
@@ -379,12 +346,13 @@ Hello ${fn || "there"}! How can I help you today?`,
     setListening(false);
     setLeadError("");
 
-    // reset turnstile flags
+    // reset gate + turnstile so it shows again next time
+    setLeadGate(true);
     turnstileRenderedRef.current = false;
     turnstileWidgetIdRef.current = null;
   };
 
-  // ✅ Prevent Enter submitting lead gate form / jumping screens
+  // ✅ Prevent Enter submitting the lead form
   const preventEnterSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") e.preventDefault();
   };
@@ -485,7 +453,7 @@ Hello ${fn || "there"}! How can I help you today?`,
 
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 setLeadError("");
 
                 const local = validateLeadLocal();
@@ -494,13 +462,9 @@ Hello ${fn || "there"}! How can I help you today?`,
                   return;
                 }
 
-                // Render if not rendered yet
-                if (!turnstileRenderedRef.current) {
-                  renderTurnstile();
-                  return;
-                }
+                // ✅ Only render + execute on button click (no auto)
+                await renderTurnstile();
 
-                // Execute
                 if (window.turnstile && turnstileWidgetIdRef.current) {
                   window.turnstile.execute(turnstileWidgetIdRef.current);
                 } else {
@@ -555,6 +519,7 @@ Hello ${fn || "there"}! How can I help you today?`,
                 listening ? "bg-red-100 border-red-400" : ""
               }`}
               type="button"
+              aria-label="Toggle microphone"
             >
               🎤
             </button>
