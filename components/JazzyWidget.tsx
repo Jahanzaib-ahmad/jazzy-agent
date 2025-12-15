@@ -15,6 +15,39 @@ declare global {
 
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
 
+/** 🌍 Global-safe name validator (supports accents + non-latin languages) */
+function validateName(raw: string) {
+  const name = (raw ?? "").trim().replace(/\s+/g, " ");
+
+  // \p{L} letters in any language
+  // \p{M} combining marks (accents etc.)
+  // allows space, dot, apostrophe, hyphen
+  const ok = /^[\p{L}\p{M}\s.'-]{2,60}$/u.test(name);
+
+  return {
+    ok,
+    value: name,
+    error: ok ? "" : "Please enter a valid name",
+  };
+}
+
+/** Basic email validation (good enough for UI) */
+function validateEmail(raw: string) {
+  const email = (raw ?? "").trim();
+  const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return {
+    ok,
+    value: email,
+    error: ok ? "" : "Enter a valid email",
+  };
+}
+
+function isDisposableEmail(email: string) {
+  const e = email.toLowerCase();
+  const disposable = ["mailinator", "tempmail", "10minutemail", "yopmail"];
+  return disposable.some((d) => e.includes(d));
+}
+
 const JazzyWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
@@ -98,7 +131,8 @@ const JazzyWidget: React.FC = () => {
 
         setTimeout(() => {
           clearInterval(check);
-          if (!window.turnstile) reject(new Error("Turnstile script loaded but window.turnstile not available"));
+          if (!window.turnstile)
+            reject(new Error("Turnstile script loaded but window.turnstile not available"));
         }, 4000);
 
         return;
@@ -168,7 +202,7 @@ const JazzyWidget: React.FC = () => {
       if (window.turnstile && turnstileWidgetIdRef.current) {
         window.turnstile.reset(turnstileWidgetIdRef.current);
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
   };
@@ -185,33 +219,36 @@ const JazzyWidget: React.FC = () => {
   }, [open, leadGate]);
 
   /* ----------------------------------------------------------------------
+    LOCAL LEAD VALIDATION (RUN BEFORE CAPTCHA)
+  ---------------------------------------------------------------------- */
+  const validateLeadLocal = () => {
+    const n = validateName(leadName);
+    if (!n.ok) return { ok: false, error: n.error };
+
+    const e = validateEmail(leadEmail);
+    if (!e.ok) return { ok: false, error: e.error };
+
+    if (isDisposableEmail(e.value)) return { ok: false, error: "Disposable emails are not allowed." };
+
+    if (!acceptedTerms) return { ok: false, error: "Please agree to the Terms & Privacy Policy." };
+
+    // normalize stored values (optional but recommended)
+    if (n.value !== leadName) setLeadName(n.value);
+    if (e.value !== leadEmail) setLeadEmail(e.value);
+
+    return { ok: true as const };
+  };
+
+  /* ----------------------------------------------------------------------
     LEAD VALIDATION + TURNSTILE SERVER CHECK
   ---------------------------------------------------------------------- */
   const validateLead = async (token: string) => {
     setLeadError("");
 
-    if (!leadName.trim().match(/^[A-Za-z ]{3,}$/)) {
-      setLeadError("Enter a valid full name.");
-      resetTurnstile();
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(leadEmail.trim())) {
-      setLeadError("Enter a valid email.");
-      resetTurnstile();
-      return;
-    }
-
-    const disposable = ["mailinator", "tempmail", "10minutemail", "yopmail"];
-    if (disposable.some((d) => leadEmail.toLowerCase().includes(d))) {
-      setLeadError("Disposable emails are not allowed.");
-      resetTurnstile();
-      return;
-    }
-
-    if (!acceptedTerms) {
-      setLeadError("Please agree to the Terms & Privacy Policy.");
+    // Safety check (in case user bypasses UI flow)
+    const local = validateLeadLocal();
+    if (!local.ok) {
+      setLeadError(local.error);
       resetTurnstile();
       return;
     }
@@ -397,7 +434,10 @@ const JazzyWidget: React.FC = () => {
             className="border w-full p-2 rounded mb-2 text-sm"
             placeholder="Full Name"
             value={leadName}
-            onChange={(e) => setLeadName(e.target.value)}
+            onChange={(e) => {
+              setLeadName(e.target.value);
+              if (leadError) setLeadError("");
+            }}
           />
 
           <input
@@ -405,7 +445,10 @@ const JazzyWidget: React.FC = () => {
             className="border w-full p-2 rounded mb-2 text-sm"
             placeholder="Email"
             value={leadEmail}
-            onChange={(e) => setLeadEmail(e.target.value)}
+            onChange={(e) => {
+              setLeadEmail(e.target.value);
+              if (leadError) setLeadError("");
+            }}
           />
 
           <div className="flex gap-2 mb-2 text-xs flex-wrap">
@@ -427,7 +470,10 @@ const JazzyWidget: React.FC = () => {
             <input
               type="checkbox"
               checked={acceptedTerms}
-              onChange={(e) => setAcceptedTerms(e.target.checked)}
+              onChange={(e) => {
+                setAcceptedTerms(e.target.checked);
+                if (leadError) setLeadError("");
+              }}
             />
             I agree to the Terms &amp; Privacy Policy.
           </label>
@@ -442,13 +488,20 @@ const JazzyWidget: React.FC = () => {
             onClick={() => {
               setLeadError("");
 
+              // ✅ Validate locally FIRST (prevents “Invalid name” + saves captcha calls)
+              const local = validateLeadLocal();
+              if (!local.ok) {
+                setLeadError(local.error);
+                return;
+              }
+
               // Render if not rendered yet
               if (!turnstileRenderedRef.current) {
                 renderTurnstile();
                 return;
               }
 
-              // Execute using widgetId (this is the correct approach)
+              // Execute using widgetId
               if (window.turnstile && turnstileWidgetIdRef.current) {
                 window.turnstile.execute(turnstileWidgetIdRef.current);
               } else {

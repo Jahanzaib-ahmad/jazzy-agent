@@ -10,12 +10,33 @@ function safeString(v: any, max = 5000) {
     .slice(0, max);
 }
 
+function tryParseBody(req: NextApiRequest) {
+  // Next usually parses JSON, but this makes it future-proof.
+  const b: any = (req as any).body;
+
+  if (!b) return {};
+  if (typeof b === "object") return b;
+
+  if (typeof b === "string") {
+    try {
+      return JSON.parse(b);
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
 function normalizeName(nameRaw: any) {
   const n = safeString(nameRaw, 80);
 
-  // Allow letters + spaces + dot + hyphen + apostrophe (common names)
-  // If it doesn't match, we don't error — we fallback.
-  const ok = /^[a-zA-Z.\-'\s]{2,80}$/.test(n);
+  // If empty -> fallback (no hard fail)
+  if (!n) return "there";
+
+  // Allow unicode letters + marks + common punctuation + spaces
+  // This supports names beyond A-Z as well.
+  const ok = /^[\p{L}\p{M}.\-'\s]{2,80}$/u.test(n);
   if (!ok) return "there";
 
   return n;
@@ -23,7 +44,6 @@ function normalizeName(nameRaw: any) {
 
 function isEmail(emailRaw: any) {
   const e = safeString(emailRaw, 120);
-  // simple + safe check
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 }
 
@@ -33,18 +53,27 @@ export const config = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ success: false, error: "Method not allowed" });
+    if (req.method !== "POST") {
+      return res.status(405).json({ success: false, error: "Method not allowed" });
+    }
 
-    const message = safeString(req.body?.message, 1500);
-    const name = normalizeName(req.body?.name);
-    const email = safeString(req.body?.email, 120);
-    const topic = safeString(req.body?.topic, 120);
-    const pageUrl = safeString(req.body?.pageUrl, 300);
-    const history = (Array.isArray(req.body?.history) ? req.body.history : []) as Msg[];
+    const body = tryParseBody(req);
 
-    if (!message) return res.status(400).json({ success: false, error: "Missing message" });
+    const message = safeString(body?.message, 1500);
+    const name = normalizeName(body?.name);
+    const email = safeString(body?.email, 120);
+    const topic = safeString(body?.topic, 120);
+    const pageUrl = safeString(body?.pageUrl, 300);
+    const history = (Array.isArray(body?.history) ? body.history : []) as Msg[];
 
-    // Email: don't hard fail, but keep it clean
+    if (!message) {
+      // Don't confuse the frontend with random errors
+      return res.status(400).json({
+        success: false,
+        error: "Missing message (bad request payload).",
+      });
+    }
+
     const emailOk = email ? isEmail(email) : false;
 
     const system = `
@@ -88,7 +117,6 @@ Lead details:
       });
     }
 
-    // Uses OpenAI Responses API style via fetch (no SDK needed)
     const r = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
