@@ -15,18 +15,22 @@ const {
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+type HistoryMsg = { role: "user" | "assistant"; content: string };
+
 type LeadPayload = {
   name: string;
   email: string;
+  phone?: string;
   topic: string;
   message: string;
   pageUrl?: string;
+  history?: HistoryMsg[];
 };
 
 /* -------------------- helpers -------------------- */
 
 function escapeHtml(input: string) {
-  return input
+  return String(input ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -35,23 +39,40 @@ function escapeHtml(input: string) {
 }
 
 function isValidEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email ?? "").trim());
+}
+
+// 🌍 Unicode-safe name validation
+function isValidGlobalName(name: string) {
+  const n = String(name ?? "").trim().replace(/\s+/g, " ");
+  if (n.length < 2 || n.length > 60) return false;
+  return /^[\p{L}\p{M}\s.'-]{2,60}$/u.test(n);
+}
+
+function normalizePhone(phone?: string) {
+  const p = String(phone ?? "").trim();
+  if (!p) return "";
+  const digitsOnly = p.replace(/[^\d]/g, "");
+  if (digitsOnly.length < 8 || digitsOnly.length > 15) return "";
+  return p;
+}
+
+function firstNameFrom(full: string) {
+  const s = String(full ?? "").trim();
+  if (!s) return "";
+  return s.split(/\s+/)[0];
 }
 
 function extractReplyText(response: any): string | null {
-  // Best case: SDK convenience
   if (typeof response?.output_text === "string" && response.output_text.trim()) {
     return response.output_text.trim();
   }
-
-  // Fallback: scan output blocks
   const output = response?.output;
   if (Array.isArray(output)) {
     for (const item of output) {
       const content = item?.content;
       if (Array.isArray(content)) {
         for (const c of content) {
-          // Common shapes
           const t1 = c?.text?.value;
           const t2 = c?.text;
           if (typeof t1 === "string" && t1.trim()) return t1.trim();
@@ -60,7 +81,6 @@ function extractReplyText(response: any): string | null {
       }
     }
   }
-
   return null;
 }
 
@@ -76,7 +96,12 @@ async function sendLeadToSheet(data: LeadPayload) {
       body: JSON.stringify({
         contents: JSON.stringify({
           timestamp: new Date().toISOString(),
-          ...data,
+          name: data.name,
+          email: data.email,
+          phone: data.phone || "",
+          topic: data.topic,
+          message: data.message,
+          pageUrl: data.pageUrl || "",
           status: "Open",
         }),
       }),
@@ -101,6 +126,7 @@ async function sendLeadEmail(data: LeadPayload) {
 
     const safeName = escapeHtml(data.name || "-");
     const safeEmail = escapeHtml(data.email || "-");
+    const safePhone = escapeHtml(data.phone || "-");
     const safeTopic = escapeHtml(data.topic || "-");
     const safeMsg = escapeHtml(data.message || "").replace(/\n/g, "<br/>");
     const safeUrl = data.pageUrl ? escapeHtml(data.pageUrl) : "";
@@ -113,13 +139,10 @@ async function sendLeadEmail(data: LeadPayload) {
         <h2>New Chat Lead / Jazzy Agent</h2>
         <p><strong>Name:</strong> ${safeName}</p>
         <p><strong>Email:</strong> ${safeEmail}</p>
+        <p><strong>Phone:</strong> ${safePhone}</p>
         <p><strong>Topic:</strong> ${safeTopic}</p>
         <p><strong>Message:</strong><br/>${safeMsg || "-"}</p>
-        ${
-          safeUrl
-            ? `<p><strong>Page URL:</strong> <a href="${safeUrl}">${safeUrl}</a></p>`
-            : ""
-        }
+        ${safeUrl ? `<p><strong>Page URL:</strong> <a href="${safeUrl}">${safeUrl}</a></p>` : ""}
         <p><strong>Status:</strong> Open</p>
       `,
     });
@@ -133,45 +156,64 @@ async function sendLeadEmail(data: LeadPayload) {
 async function generateJazzyReply(data: LeadPayload): Promise<string> {
   if (!OPENAI_API_KEY) {
     return (
-      "Thanks for your message! Our AI assistant is temporarily offline, " +
-      "but a human from Digitalboxes will follow up with you shortly."
+      "Thanks! Our assistant is temporarily offline, but a human from Digitalboxes will follow up shortly."
     );
   }
 
+  const fn = firstNameFrom(data.name);
+
   const systemPrompt = `
-You are Jazzy, the friendly AI assistant for Digitalboxes (a digital marketing
-and development agency). Your goals:
-- Be clear, helpful, and concise.
-- Answer in simple, conversational English.
-- If the user is asking about services, briefly explain how Digitalboxes can help
-  and encourage them that a human will follow up by email.
-- Never promise exact prices or timelines; keep it high level.
-- If information is missing, ask 1–2 simple follow-up questions.
-  `.trim();
+You are Jazzy, the Digitalboxes AI assistant.
 
-  const userPrompt = `
-User details:
-- Name: ${data.name || "Unknown"}
-- Email: ${data.email || "Not provided"}
-- Topic: ${data.topic || "Not specified"}
+Mission:
+- Help the visitor quickly and capture lead intent for Digitalboxes services/tools.
+- Use the conversation history as truth.
 
-User message:
-${data.message || "(no message entered)"}
-  `.trim();
+Hard rules:
+- Do NOT ask for details that the user already provided earlier in the chat (business type, location, goals, budget, timeline, phone).
+- If the user says “I already shared this” (or similar), acknowledge and summarize what you already have instead of asking again.
+- Ask at most ONE follow-up question, only if something critical is missing to help them.
+- Keep replies short, natural, and non-robotic. No markdown bold like **this**.
+
+Contact:
+- If asked "how will you contact me?", say you’ll reach them via email or WhatsApp using the details they provided.
+
+Personalization:
+- Use the user's first name sometimes: ${fn || "there"}.
+`.trim();
+
+  // Build conversation with history
+  const inputMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    { role: "system", content: systemPrompt },
+  ];
+
+  const history = Array.isArray(data.history) ? data.history.slice(-20) : [];
+  for (const m of history) {
+    if (!m?.content) continue;
+    if (m.role === "user" || m.role === "assistant") {
+      inputMessages.push({ role: m.role, content: String(m.content) });
+    }
+  }
+
+  // Add lead context (so the model knows phone exists + can greet properly)
+  inputMessages.push({
+    role: "user",
+    content: `Lead snapshot: name=${data.name}, email=${data.email}, phone=${data.phone || "N/A"}, topic=${data.topic}, page=${data.pageUrl || "N/A"}`,
+  });
+
+  // Latest message
+  inputMessages.push({
+    role: "user",
+    content: data.message || "(no message entered)",
+  });
 
   const response = await openai.responses.create({
     model: "gpt-4.1-mini",
-    input: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
+    input: inputMessages,
   });
 
   const reply = extractReplyText(response);
-  return (
-    reply ||
-    "Thanks for the details! A member of the Digitalboxes team will review this and follow up with you soon."
-  );
+  return reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
 }
 
 /* -------------------------- Main handler -------------------------- */
@@ -185,18 +227,21 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { name, email, topic, message, pageUrl } = req.body || {};
+    const body = req.body || {};
+    const leadObj = body.lead && typeof body.lead === "object" ? body.lead : body;
 
     const lead: LeadPayload = {
-      name: (name || "").toString().trim(),
-      email: (email || "").toString().trim(),
-      topic: (topic || "Something Else").toString().trim(),
-      message: (message || "").toString().trim(),
-      pageUrl: pageUrl ? pageUrl.toString() : undefined,
+      name: String(leadObj?.name ?? "").trim(),
+      email: String(leadObj?.email ?? "").trim(),
+      phone: normalizePhone(leadObj?.phone),
+      topic: String(leadObj?.topic ?? body.topic ?? "Something Else").trim() || "Something Else",
+      message: String(body.message ?? leadObj?.message ?? "").trim(),
+      pageUrl: body.pageUrl ? String(body.pageUrl) : leadObj?.pageUrl ? String(leadObj.pageUrl) : undefined,
+      history: Array.isArray(body.history) ? (body.history as HistoryMsg[]) : undefined,
     };
 
-    // Basic validation so junk doesn’t hit OpenAI / email
-    if (!lead.name || lead.name.length < 3) {
+    // Validation
+    if (!isValidGlobalName(lead.name)) {
       return res.status(400).json({ success: false, error: "Invalid name" });
     }
     if (!isValidEmail(lead.email)) {
@@ -211,7 +256,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     void sendLeadEmail(lead);
 
     const reply = await generateJazzyReply(lead);
-
     return res.status(200).json({ success: true, reply });
   } catch (err: any) {
     console.error("[Jazzy] API error:", err);
