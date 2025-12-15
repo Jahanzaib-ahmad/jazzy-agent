@@ -29,16 +29,12 @@ function validateEmail(raw: string) {
   return { ok, value: email, error: ok ? "" : "Enter a valid email" };
 }
 
-/** Phone validation (simple but effective)
- * Accepts + country code or local formats (we normalize to digits for checking).
- * If you want strict E.164 only, tell me and I’ll enforce +XXXXXXXX.
- */
+/** Phone validation (8–15 digits total, allows + and separators) */
 function validatePhone(raw: string) {
   const phone = (raw ?? "").trim();
   const digits = phone.replace(/[^\d+]/g, ""); // keep digits and +
   const justDigits = digits.replace(/\+/g, "");
 
-  // allow 8–15 digits (covers most countries)
   const ok = justDigits.length >= 8 && justDigits.length <= 15;
 
   return {
@@ -73,7 +69,7 @@ const JazzyWidget: React.FC = () => {
   const [leadGate, setLeadGate] = useState(true);
   const [leadName, setLeadName] = useState("");
   const [leadEmail, setLeadEmail] = useState("");
-  const [leadPhone, setLeadPhone] = useState(""); // ✅ NEW
+  const [leadPhone, setLeadPhone] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [leadError, setLeadError] = useState("");
 
@@ -223,12 +219,16 @@ const JazzyWidget: React.FC = () => {
     const e = validateEmail(leadEmail);
     if (!e.ok) return { ok: false as const, error: e.error };
 
-    if (isDisposableEmail(e.value)) return { ok: false as const, error: "Disposable emails are not allowed." };
+    if (isDisposableEmail(e.value)) {
+      return { ok: false as const, error: "Disposable emails are not allowed." };
+    }
 
     const p = validatePhone(leadPhone);
     if (!p.ok) return { ok: false as const, error: p.error };
 
-    if (!acceptedTerms) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
+    if (!acceptedTerms) {
+      return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
+    }
 
     // normalize stored values
     if (leadName !== n.value) setLeadName(n.value);
@@ -316,11 +316,11 @@ const JazzyWidget: React.FC = () => {
           lead: {
             name: leadName,
             email: leadEmail,
-            phone: leadPhone, // ✅ NEW
+            phone: leadPhone,
             topic: selectedTopic,
           },
           message: text,
-          history: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })), // ✅ STOP REPEATS
+          history: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })),
           pageUrl: typeof window !== "undefined" ? window.location.href : "",
         }),
       });
@@ -338,8 +338,7 @@ const JazzyWidget: React.FC = () => {
       }
 
       const data = await res.json().catch(() => null);
-      const reply: string =
-        data?.reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+      const reply: string = data?.reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
 
       setMessages((prev) => [...prev, { id: Date.now() + "-jazzy", role: "assistant", content: reply }]);
     } catch (err) {
@@ -353,6 +352,9 @@ const JazzyWidget: React.FC = () => {
     }
   };
 
+  /* ----------------------------------------------------------------------
+    MIC
+  ---------------------------------------------------------------------- */
   const toggleMic = () => {
     if (!recognitionRef.current) return;
     if (listening) recognitionRef.current.stop();
@@ -375,6 +377,11 @@ const JazzyWidget: React.FC = () => {
     turnstileWidgetIdRef.current = null;
   };
 
+  // ✅ Prevent Enter submitting lead gate form
+  const preventEnterSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") e.preventDefault();
+  };
+
   return (
     <>
       {/* FLOATING BUTTON */}
@@ -391,102 +398,112 @@ const JazzyWidget: React.FC = () => {
       {/* LEAD FORM */}
       {open && leadGate && (
         <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-50">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-lg">Before we start ⭐</h3>
-            <button onClick={closeWidget} className="text-xs text-gray-500 hover:text-gray-800">
-              Close
-            </button>
-          </div>
-
-          <input
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Full Name"
-            value={leadName}
-            onChange={(e) => {
-              setLeadName(e.target.value);
-              if (leadError) setLeadError("");
+          {/* ✅ Form wrapper: prevents default submit */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
             }}
-          />
-
-          <input
-            type="email"
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Email"
-            value={leadEmail}
-            onChange={(e) => {
-              setLeadEmail(e.target.value);
-              if (leadError) setLeadError("");
-            }}
-          />
-
-          {/* ✅ NEW PHONE FIELD */}
-          <input
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Phone (WhatsApp preferred)"
-            value={leadPhone}
-            onChange={(e) => {
-              setLeadPhone(e.target.value);
-              if (leadError) setLeadError("");
-            }}
-          />
-
-          <div className="flex gap-2 mb-2 text-xs flex-wrap">
-            {["Marketing & Services", "Free AI / SEO Tools", "Something Else"].map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setSelectedTopic(t)}
-                className={`px-2 py-1 rounded border ${
-                  selectedTopic === t ? "bg-blue-600 text-white" : "bg-white text-gray-800"
-                }`}
-              >
-                {t}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-lg">Let’s get you to the right place 👋</h3>
+              <button onClick={closeWidget} type="button" className="text-xs text-gray-500 hover:text-gray-800">
+                Close
               </button>
-            ))}
-          </div>
+            </div>
 
-          <label className="text-xs flex items-center gap-2 mb-2">
             <input
-              type="checkbox"
-              checked={acceptedTerms}
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="Your full name"
+              value={leadName}
               onChange={(e) => {
-                setAcceptedTerms(e.target.checked);
+                setLeadName(e.target.value);
                 if (leadError) setLeadError("");
               }}
+              onKeyDown={preventEnterSubmit}
             />
-            I accept the Terms &amp; Conditions and Privacy Policy.
-          </label>
 
-          <div id="cf-turnstile" />
+            <input
+              type="email"
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="you@company.com"
+              value={leadEmail}
+              onChange={(e) => {
+                setLeadEmail(e.target.value);
+                if (leadError) setLeadError("");
+              }}
+              onKeyDown={preventEnterSubmit}
+            />
 
-          {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
+            <input
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="Phone (WhatsApp preferred)"
+              value={leadPhone}
+              onChange={(e) => {
+                setLeadPhone(e.target.value);
+                if (leadError) setLeadError("");
+              }}
+              onKeyDown={preventEnterSubmit}
+            />
 
-          <button
-            type="button"
-            onClick={() => {
-              setLeadError("");
+            <div className="flex gap-2 mb-2 text-xs flex-wrap">
+              {["Marketing & Services", "Free AI / SEO Tools", "Something Else"].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSelectedTopic(t)}
+                  className={`px-2 py-1 rounded border ${
+                    selectedTopic === t ? "bg-blue-600 text-white" : "bg-white text-gray-800"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
 
-              const local = validateLeadLocal();
-              if (!local.ok) {
-                setLeadError(local.error);
-                return;
-              }
+            <label className="text-xs flex items-center gap-2 mb-2">
+              <input
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => {
+                  setAcceptedTerms(e.target.checked);
+                  if (leadError) setLeadError("");
+                }}
+              />
+              I accept the Terms &amp; Conditions and Privacy Policy.
+            </label>
 
-              if (!turnstileRenderedRef.current) {
-                renderTurnstile();
-                return;
-              }
+            <div id="cf-turnstile" />
 
-              if (window.turnstile && turnstileWidgetIdRef.current) {
-                window.turnstile.execute(turnstileWidgetIdRef.current);
-              } else {
-                setLeadError("Captcha not ready. Please try again.");
-              }
-            }}
-            className="w-full bg-blue-600 text-white py-2 rounded text-sm"
-          >
-            Continue to chat
-          </button>
+            {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
+
+            <button
+              type="button"
+              onClick={() => {
+                setLeadError("");
+
+                const local = validateLeadLocal();
+                if (!local.ok) {
+                  setLeadError(local.error);
+                  return;
+                }
+
+                if (!turnstileRenderedRef.current) {
+                  renderTurnstile();
+                  return;
+                }
+
+                if (window.turnstile && turnstileWidgetIdRef.current) {
+                  window.turnstile.execute(turnstileWidgetIdRef.current);
+                } else {
+                  setLeadError("Captcha not ready. Please try again.");
+                }
+              }}
+              className="w-full bg-blue-600 text-white py-2 rounded text-sm"
+            >
+              Continue to chat
+            </button>
+          </form>
         </div>
       )}
 
@@ -500,11 +517,11 @@ const JazzyWidget: React.FC = () => {
               <div className="text-xs text-gray-500">Your AI Assistant</div>
             </div>
 
-            <button className="ml-auto text-xs text-gray-600 hover:text-gray-900" onClick={endChat}>
+            <button className="ml-auto text-xs text-gray-600 hover:text-gray-900" onClick={endChat} type="button">
               End chat
             </button>
 
-            <button className="ml-2 text-xs text-gray-600 hover:text-gray-900" onClick={closeWidget}>
+            <button className="ml-2 text-xs text-gray-600 hover:text-gray-900" onClick={closeWidget} type="button">
               Close
             </button>
           </div>
