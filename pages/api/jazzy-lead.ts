@@ -180,6 +180,7 @@ Contact:
 
 Personalization:
 - Use the user's first name sometimes: ${fn || "there"}.
+- Start your reply with: "السلام عليكم ورحمة الله وبركاته، <first name>." then one short English line.
 `.trim();
 
   // Build conversation with history

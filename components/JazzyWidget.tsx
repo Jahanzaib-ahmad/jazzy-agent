@@ -29,13 +29,11 @@ function validateEmail(raw: string) {
   return { ok, value: email, error: ok ? "" : "Enter a valid email" };
 }
 
-/** Phone validation (8–15 digits total, allows + and separators) */
+/** Phone validation (8–15 digits, allows + and separators) */
 function validatePhone(raw: string) {
   const phone = (raw ?? "").trim();
-  const digits = phone.replace(/[^\d+]/g, ""); // keep digits and +
-  const justDigits = digits.replace(/\+/g, "");
-
-  const ok = justDigits.length >= 8 && justDigits.length <= 15;
+  const digitsOnly = phone.replace(/[^\d]/g, "");
+  const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
 
   return {
     ok,
@@ -124,6 +122,7 @@ const JazzyWidget: React.FC = () => {
   const ensureTurnstileScript = () =>
     new Promise<void>((resolve, reject) => {
       if (typeof window === "undefined") return resolve();
+
       if (window.turnstile) return resolve();
 
       const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`);
@@ -153,7 +152,7 @@ const JazzyWidget: React.FC = () => {
     });
 
   /* ----------------------------------------------------------------------
-    RENDER TURNSTILE WIDGET
+    RENDER TURNSTILE WIDGET (INVISIBLE)
   ---------------------------------------------------------------------- */
   const renderTurnstile = async () => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -165,11 +164,13 @@ const JazzyWidget: React.FC = () => {
 
     try {
       await ensureTurnstileScript();
+
       if (!window.turnstile) {
         setLeadError("Captcha failed to initialize. Please refresh.");
         return;
       }
 
+      // Render only once per widget open
       if (turnstileRenderedRef.current && turnstileWidgetIdRef.current) return;
 
       const container = document.getElementById("cf-turnstile");
@@ -201,6 +202,9 @@ const JazzyWidget: React.FC = () => {
     } catch {}
   };
 
+  /* ----------------------------------------------------------------------
+    WHEN MODAL OPENS, PREP TURNSTILE
+  ---------------------------------------------------------------------- */
   useEffect(() => {
     if (open && leadGate) {
       setLeadError("");
@@ -277,6 +281,7 @@ const JazzyWidget: React.FC = () => {
         return;
       }
 
+      // ✅ Open chat
       setLeadGate(false);
 
       const fn = firstNameFrom(leadName);
@@ -284,7 +289,8 @@ const JazzyWidget: React.FC = () => {
         {
           id: "welcome-" + Date.now(),
           role: "assistant",
-          content: `Hey ${fn || "there"}! I'm Jazzy 👋 Tell me what you need and I’ll help you fast.`,
+          content: `السلام عليكم ورحمة الله وبركاته، ${fn || "أهلاً"} 👋
+Hello ${fn || "there"}! How can I help you today?`,
         },
       ]);
     } catch (err) {
@@ -373,11 +379,12 @@ const JazzyWidget: React.FC = () => {
     setListening(false);
     setLeadError("");
 
+    // reset turnstile flags
     turnstileRenderedRef.current = false;
     turnstileWidgetIdRef.current = null;
   };
 
-  // ✅ Prevent Enter submitting lead gate form
+  // ✅ Prevent Enter submitting lead gate form / jumping screens
   const preventEnterSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") e.preventDefault();
   };
@@ -398,7 +405,6 @@ const JazzyWidget: React.FC = () => {
       {/* LEAD FORM */}
       {open && leadGate && (
         <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-50">
-          {/* ✅ Form wrapper: prevents default submit */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -488,11 +494,13 @@ const JazzyWidget: React.FC = () => {
                   return;
                 }
 
+                // Render if not rendered yet
                 if (!turnstileRenderedRef.current) {
                   renderTurnstile();
                   return;
                 }
 
+                // Execute
                 if (window.turnstile && turnstileWidgetIdRef.current) {
                   window.turnstile.execute(turnstileWidgetIdRef.current);
                 } else {
