@@ -34,12 +34,7 @@ function validatePhone(raw: string) {
   const phone = (raw ?? "").trim();
   const digitsOnly = phone.replace(/[^\d]/g, "");
   const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
-
-  return {
-    ok,
-    value: phone,
-    error: ok ? "" : "Enter a valid phone number",
-  };
+  return { ok, value: phone, error: ok ? "" : "Enter a valid phone number" };
 }
 
 function isDisposableEmail(email: string) {
@@ -50,8 +45,7 @@ function isDisposableEmail(email: string) {
 
 function firstNameFrom(full: string) {
   const s = (full ?? "").trim();
-  if (!s) return "";
-  return s.split(/\s+/)[0];
+  return s ? s.split(/\s+/)[0] : "";
 }
 
 const JazzyWidget: React.FC = () => {
@@ -144,7 +138,7 @@ const JazzyWidget: React.FC = () => {
       document.head.appendChild(script);
     });
 
-  /* ---------------- Render Turnstile widget (only when user clicks) ---------------- */
+  /* ---------------- Render Turnstile widget ONLY when user clicks ---------------- */
   const renderTurnstile = async () => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -153,36 +147,30 @@ const JazzyWidget: React.FC = () => {
       return;
     }
 
-    try {
-      await ensureTurnstileScript();
+    await ensureTurnstileScript();
 
-      if (!window.turnstile) {
-        setLeadError("Captcha failed to initialize. Please refresh.");
-        return;
-      }
-
-      // If already rendered, do nothing (we will execute by ID)
-      if (turnstileRenderedRef.current && turnstileWidgetIdRef.current) return;
-
-      const container = document.getElementById("cf-turnstile");
-      if (!container) return;
-
-      container.innerHTML = "";
-
-      const widgetId = window.turnstile.render(container, {
-        sitekey: siteKey,
-        size: "invisible",
-        callback: (token: string) => validateLead(token),
-        "error-callback": () => setLeadError("Captcha failed. Please try again."),
-        "expired-callback": () => setLeadError("Captcha expired. Please try again."),
-      });
-
-      turnstileWidgetIdRef.current = widgetId;
-      turnstileRenderedRef.current = true;
-    } catch (e) {
-      console.error("[Jazzy] Turnstile init error:", e);
-      setLeadError("Captcha failed to load. Please try again.");
+    if (!window.turnstile) {
+      setLeadError("Captcha failed to initialize. Please refresh.");
+      return;
     }
+
+    if (turnstileRenderedRef.current && turnstileWidgetIdRef.current) return;
+
+    const container = document.getElementById("cf-turnstile");
+    if (!container) return;
+
+    container.innerHTML = "";
+
+    const widgetId = window.turnstile.render(container, {
+      sitekey: siteKey,
+      size: "invisible",
+      callback: (token: string) => validateLead(token),
+      "error-callback": () => setLeadError("Captcha failed. Please try again."),
+      "expired-callback": () => setLeadError("Captcha expired. Please try again."),
+    });
+
+    turnstileWidgetIdRef.current = widgetId;
+    turnstileRenderedRef.current = true;
   };
 
   const resetTurnstile = () => {
@@ -208,7 +196,7 @@ const JazzyWidget: React.FC = () => {
 
     if (!acceptedTerms) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
 
-    // normalize stored values
+    // normalize
     if (leadName !== n.value) setLeadName(n.value);
     if (leadEmail !== e.value) setLeadEmail(e.value);
     if (leadPhone !== p.value) setLeadPhone(p.value);
@@ -257,6 +245,7 @@ const JazzyWidget: React.FC = () => {
       setLeadGate(false);
 
       const fn = firstNameFrom(leadName);
+
       setMessages([
         {
           id: "welcome-" + Date.now(),
@@ -272,7 +261,7 @@ Hello ${fn || "there"}! How can I help you today?`,
     }
   };
 
-  /* ---------------- Send message to API (with history to stop repeats) ---------------- */
+  /* ---------------- Send message to API (WITH HISTORY) ---------------- */
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
@@ -346,13 +335,12 @@ Hello ${fn || "there"}! How can I help you today?`,
     setListening(false);
     setLeadError("");
 
-    // reset gate + turnstile so it shows again next time
+    // reset gate + turnstile
     setLeadGate(true);
     turnstileRenderedRef.current = false;
     turnstileWidgetIdRef.current = null;
   };
 
-  // ✅ Prevent Enter submitting the lead form
   const preventEnterSubmit = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") e.preventDefault();
   };
@@ -361,7 +349,7 @@ Hello ${fn || "there"}! How can I help you today?`,
     <>
       {/* FLOATING BUTTON */}
       <div
-        className="fixed bottom-5 right-5 z-50 bg-white border shadow-lg px-3 py-2 rounded-full flex items-center cursor-pointer"
+        className="fixed bottom-5 right-5 z-[999999] bg-white border shadow-lg px-3 py-2 rounded-full flex items-center cursor-pointer"
         onClick={() => setOpen(true)}
         role="button"
         aria-label="Open Jazzy chat"
@@ -372,7 +360,7 @@ Hello ${fn || "there"}! How can I help you today?`,
 
       {/* LEAD FORM */}
       {open && leadGate && (
-        <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-50">
+        <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-[999999]">
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -462,7 +450,7 @@ Hello ${fn || "there"}! How can I help you today?`,
                   return;
                 }
 
-                // ✅ Only render + execute on button click (no auto)
+                // ✅ render + execute ONLY on click
                 await renderTurnstile();
 
                 if (window.turnstile && turnstileWidgetIdRef.current) {
@@ -481,7 +469,7 @@ Hello ${fn || "there"}! How can I help you today?`,
 
       {/* CHAT WINDOW */}
       {open && !leadGate && (
-        <div className="fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-50">
+        <div className="fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-[999999]">
           <div className="p-3 border-b bg-gray-100 flex items-center">
             <img src="/jazzy-avatar.jpg" className="h-9 w-9 rounded-full" alt="Jazzy avatar" />
             <div className="ml-2">
@@ -546,7 +534,7 @@ Hello ${fn || "there"}! How can I help you today?`,
 
       {/* SURVEY MODAL */}
       {showSurvey && (
-        <div className="fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-50">
+        <div className="fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-[999999]">
           <h3 className="font-semibold mb-2">Rate your experience</h3>
 
           <div className="flex gap-2 mb-3 text-xl">

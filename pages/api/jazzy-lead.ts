@@ -15,19 +15,30 @@ const {
 
 const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-type HistoryMsg = { role: "user" | "assistant"; content: string };
-
-type LeadPayload = {
+type Lead = {
   name: string;
   email: string;
   phone?: string;
   topic: string;
-  message: string;
-  pageUrl?: string;
-  history?: HistoryMsg[];
 };
 
-/* -------------------- helpers -------------------- */
+type ReqBody =
+  | {
+      // NEW shape
+      lead: Lead;
+      message: string;
+      history?: Array<{ role: "user" | "assistant"; content: string }>;
+      pageUrl?: string;
+    }
+  | {
+      // OLD shape
+      name: string;
+      email: string;
+      phone?: string;
+      topic: string;
+      message: string;
+      pageUrl?: string;
+    };
 
 function escapeHtml(input: string) {
   return String(input ?? "")
@@ -39,54 +50,29 @@ function escapeHtml(input: string) {
 }
 
 function isValidEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email ?? "").trim());
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// 🌍 Unicode-safe name validation
-function isValidGlobalName(name: string) {
-  const n = String(name ?? "").trim().replace(/\s+/g, " ");
-  if (n.length < 2 || n.length > 60) return false;
-  return /^[\p{L}\p{M}\s.'-]{2,60}$/u.test(n);
+function cleanStr(v: any, max = 500) {
+  const s = String(v ?? "").trim();
+  return s.length > max ? s.slice(0, max) : s;
 }
 
-function normalizePhone(phone?: string) {
-  const p = String(phone ?? "").trim();
-  if (!p) return "";
-  const digitsOnly = p.replace(/[^\d]/g, "");
-  if (digitsOnly.length < 8 || digitsOnly.length > 15) return "";
-  return p;
+function firstMessageFromHistory(history?: Array<{ role: string; content: string }>, fallback?: string) {
+  const h = Array.isArray(history) ? history : [];
+  const firstUser = h.find((m) => m.role === "user" && (m.content ?? "").trim());
+  return cleanStr(firstUser?.content || fallback || "", 2000);
 }
 
-function firstNameFrom(full: string) {
-  const s = String(full ?? "").trim();
-  if (!s) return "";
-  return s.split(/\s+/)[0];
-}
-
-function extractReplyText(response: any): string | null {
-  if (typeof response?.output_text === "string" && response.output_text.trim()) {
-    return response.output_text.trim();
-  }
-  const output = response?.output;
-  if (Array.isArray(output)) {
-    for (const item of output) {
-      const content = item?.content;
-      if (Array.isArray(content)) {
-        for (const c of content) {
-          const t1 = c?.text?.value;
-          const t2 = c?.text;
-          if (typeof t1 === "string" && t1.trim()) return t1.trim();
-          if (typeof t2 === "string" && t2.trim()) return t2.trim();
-        }
-      }
-    }
-  }
-  return null;
-}
-
-/* ----------------- Google Sheet webhook (optional) ----------------- */
-
-async function sendLeadToSheet(data: LeadPayload) {
+/* ----------------- Google Sheet webhook (fixed payload) ----------------- */
+async function sendLeadToSheet(row: {
+  name: string;
+  email: string;
+  phone: string;
+  topic: string;
+  firstMessage: string;
+  pageUrl: string;
+}) {
   if (!LEADS_WEBHOOK_URL) return;
 
   try {
@@ -94,16 +80,14 @@ async function sendLeadToSheet(data: LeadPayload) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          name: data.name,
-          email: data.email,
-          phone: data.phone || "",
-          topic: data.topic,
-          message: data.message,
-          pageUrl: data.pageUrl || "",
-          status: "Open",
-        }),
+        timestamp: new Date().toISOString(),
+        name: row.name,
+        email: row.email,
+        phone: row.phone,
+        topic: row.topic,
+        firstMessage: row.firstMessage,
+        pageUrl: row.pageUrl,
+        status: "Open",
       }),
     });
   } catch (err) {
@@ -112,8 +96,14 @@ async function sendLeadToSheet(data: LeadPayload) {
 }
 
 /* ----------------------- SMTP email notify ------------------------- */
-
-async function sendLeadEmail(data: LeadPayload) {
+async function sendLeadEmail(row: {
+  name: string;
+  email: string;
+  phone: string;
+  topic: string;
+  firstMessage: string;
+  pageUrl: string;
+}) {
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS || !NOTIFY_EMAIL) return;
 
   try {
@@ -124,12 +114,12 @@ async function sendLeadEmail(data: LeadPayload) {
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
 
-    const safeName = escapeHtml(data.name || "-");
-    const safeEmail = escapeHtml(data.email || "-");
-    const safePhone = escapeHtml(data.phone || "-");
-    const safeTopic = escapeHtml(data.topic || "-");
-    const safeMsg = escapeHtml(data.message || "").replace(/\n/g, "<br/>");
-    const safeUrl = data.pageUrl ? escapeHtml(data.pageUrl) : "";
+    const safeName = escapeHtml(row.name || "-");
+    const safeEmail = escapeHtml(row.email || "-");
+    const safePhone = escapeHtml(row.phone || "-");
+    const safeTopic = escapeHtml(row.topic || "-");
+    const safeMsg = escapeHtml(row.firstMessage || "").replace(/\n/g, "<br/>");
+    const safeUrl = row.pageUrl ? escapeHtml(row.pageUrl) : "";
 
     await transporter.sendMail({
       from: `"Jazzy Agent" <${SMTP_USER}>`,
@@ -141,8 +131,12 @@ async function sendLeadEmail(data: LeadPayload) {
         <p><strong>Email:</strong> ${safeEmail}</p>
         <p><strong>Phone:</strong> ${safePhone}</p>
         <p><strong>Topic:</strong> ${safeTopic}</p>
-        <p><strong>Message:</strong><br/>${safeMsg || "-"}</p>
-        ${safeUrl ? `<p><strong>Page URL:</strong> <a href="${safeUrl}">${safeUrl}</a></p>` : ""}
+        <p><strong>First Message:</strong><br/>${safeMsg || "-"}</p>
+        ${
+          safeUrl
+            ? `<p><strong>Page URL:</strong> <a href="${safeUrl}">${safeUrl}</a></p>`
+            : ""
+        }
         <p><strong>Status:</strong> Open</p>
       `,
     });
@@ -152,73 +146,62 @@ async function sendLeadEmail(data: LeadPayload) {
 }
 
 /* ------------------- OpenAI – generate reply ---------------------- */
-
-async function generateJazzyReply(data: LeadPayload): Promise<string> {
+async function generateJazzyReply(args: {
+  lead: Lead;
+  message: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+}): Promise<string> {
   if (!OPENAI_API_KEY) {
     return (
-      "Thanks! Our assistant is temporarily offline, but a human from Digitalboxes will follow up shortly."
+      "Thanks for your message! Our AI assistant is temporarily offline, " +
+      "but a human from Digitalboxes will follow up with you shortly."
     );
   }
 
-  const fn = firstNameFrom(data.name);
+  const fn = cleanStr(args.lead?.name?.split(/\s+/)[0] || "there", 40);
 
   const systemPrompt = `
-You are Jazzy, the Digitalboxes AI assistant.
-
-Mission:
-- Help the visitor quickly and capture lead intent for Digitalboxes services/tools.
-- Use the conversation history as truth.
+You are Jazzy, the friendly AI assistant for Digitalboxes (a digital marketing and development agency).
 
 Hard rules:
-- Do NOT ask for details that the user already provided earlier in the chat (business type, location, goals, budget, timeline, phone).
-- If the user says “I already shared this” (or similar), acknowledge and summarize what you already have instead of asking again.
-- Ask at most ONE follow-up question, only if something critical is missing to help them.
-- Keep replies short, natural, and non-robotic. No markdown bold like **this**.
-
-Contact:
-- If asked "how will you contact me?", say you’ll reach them via email or WhatsApp using the details they provided.
+- DO NOT ask for details the user already provided earlier in this chat (business type, location, goals, budget, timeline).
+- If the user says they already shared info, acknowledge and summarize what you have.
+- Ask at most ONE follow-up question only if something critical is missing.
+- Keep replies short, natural, and non-robotic. No markdown.
 
 Personalization:
-- Use the user's first name sometimes: ${fn || "there"}.
-- Start your reply with: "السلام عليكم ورحمة الله وبركاته، <first name>." then one short English line.
-`.trim();
+- Start the reply with: "السلام عليكم ورحمة الله وبركاته، ${fn}."
+- Then one short English line.
 
-  // Build conversation with history
-  const inputMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-    { role: "system", content: systemPrompt },
+Contact:
+- If asked "how will you contact me?", say: "We’ll reach you via email or WhatsApp using the details you provided."
+  `.trim();
+
+  const history = Array.isArray(args.history) ? args.history : [];
+  const trimmed = history.slice(-16).map((m) => ({
+    role: m.role,
+    content: cleanStr(m.content, 2000),
+  }));
+
+  const input = [
+    { role: "system" as const, content: systemPrompt },
+    { role: "user" as const, content: `Lead: ${args.lead.name} | ${args.lead.email} | ${args.lead.phone || "-"} | Topic: ${args.lead.topic}` },
+    ...trimmed,
+    { role: "user" as const, content: cleanStr(args.message, 2000) },
   ];
-
-  const history = Array.isArray(data.history) ? data.history.slice(-20) : [];
-  for (const m of history) {
-    if (!m?.content) continue;
-    if (m.role === "user" || m.role === "assistant") {
-      inputMessages.push({ role: m.role, content: String(m.content) });
-    }
-  }
-
-  // Add lead context (so the model knows phone exists + can greet properly)
-  inputMessages.push({
-    role: "user",
-    content: `Lead snapshot: name=${data.name}, email=${data.email}, phone=${data.phone || "N/A"}, topic=${data.topic}, page=${data.pageUrl || "N/A"}`,
-  });
-
-  // Latest message
-  inputMessages.push({
-    role: "user",
-    content: data.message || "(no message entered)",
-  });
 
   const response = await openai.responses.create({
     model: "gpt-4.1-mini",
-    input: inputMessages,
+    input,
   });
 
-  const reply = extractReplyText(response);
-  return reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+  const out = (response as any)?.output_text;
+  if (typeof out === "string" && out.trim()) return out.trim();
+
+  return "Thanks! A member of the Digitalboxes team will follow up with you soon.";
 }
 
 /* -------------------------- Main handler -------------------------- */
-
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader("Cache-Control", "no-store");
 
@@ -228,35 +211,55 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const body = req.body || {};
-    const leadObj = body.lead && typeof body.lead === "object" ? body.lead : body;
+    const body = (req.body || {}) as ReqBody;
 
-    const lead: LeadPayload = {
-      name: String(leadObj?.name ?? "").trim(),
-      email: String(leadObj?.email ?? "").trim(),
-      phone: normalizePhone(leadObj?.phone),
-      topic: String(leadObj?.topic ?? body.topic ?? "Something Else").trim() || "Something Else",
-      message: String(body.message ?? leadObj?.message ?? "").trim(),
-      pageUrl: body.pageUrl ? String(body.pageUrl) : leadObj?.pageUrl ? String(leadObj.pageUrl) : undefined,
-      history: Array.isArray(body.history) ? (body.history as HistoryMsg[]) : undefined,
-    };
+    // Accept both payload shapes
+    const lead: Lead = "lead" in body
+      ? {
+          name: cleanStr(body.lead?.name, 120),
+          email: cleanStr(body.lead?.email, 180),
+          phone: cleanStr(body.lead?.phone, 40),
+          topic: cleanStr(body.lead?.topic || "Something Else", 120),
+        }
+      : {
+          name: cleanStr((body as any).name, 120),
+          email: cleanStr((body as any).email, 180),
+          phone: cleanStr((body as any).phone, 40),
+          topic: cleanStr((body as any).topic || "Something Else", 120),
+        };
+
+    const message = cleanStr(("message" in body ? body.message : (body as any).message) || "", 2000);
+    const pageUrl = cleanStr(("pageUrl" in body ? body.pageUrl : (body as any).pageUrl) || "", 500);
+    const history = "history" in body ? body.history : undefined;
 
     // Validation
-    if (!isValidGlobalName(lead.name)) {
-      return res.status(400).json({ success: false, error: "Invalid name" });
-    }
-    if (!isValidEmail(lead.email)) {
-      return res.status(400).json({ success: false, error: "Invalid email" });
-    }
-    if (!lead.message) {
-      return res.status(400).json({ success: false, error: "Message is required" });
-    }
+    if (!lead.name || lead.name.length < 2) return res.status(400).json({ success: false, error: "Invalid name" });
+    if (!isValidEmail(lead.email)) return res.status(400).json({ success: false, error: "Invalid email" });
+    if (!message) return res.status(400).json({ success: false, error: "Message is required" });
 
-    // Fire-and-forget
-    void sendLeadToSheet(lead);
-    void sendLeadEmail(lead);
+    const firstMessage = firstMessageFromHistory(history as any, message);
 
-    const reply = await generateJazzyReply(lead);
+    // Fire-and-forget lead capture (sheet + email)
+    void sendLeadToSheet({
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone || "",
+      topic: lead.topic,
+      firstMessage,
+      pageUrl,
+    });
+
+    void sendLeadEmail({
+      name: lead.name,
+      email: lead.email,
+      phone: lead.phone || "",
+      topic: lead.topic,
+      firstMessage,
+      pageUrl,
+    });
+
+    const reply = await generateJazzyReply({ lead, message, history: history as any });
+
     return res.status(200).json({ success: true, reply });
   } catch (err: any) {
     console.error("[Jazzy] API error:", err);
