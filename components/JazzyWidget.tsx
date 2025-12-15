@@ -15,30 +15,36 @@ declare global {
 
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
 
-/** 🌍 Global-safe name validator (supports accents + non-latin languages) */
+/** 🌍 Global-safe name validator */
 function validateName(raw: string) {
   const name = (raw ?? "").trim().replace(/\s+/g, " ");
-
-  // \p{L} letters in any language
-  // \p{M} combining marks (accents etc.)
-  // allows space, dot, apostrophe, hyphen
   const ok = /^[\p{L}\p{M}\s.'-]{2,60}$/u.test(name);
-
-  return {
-    ok,
-    value: name,
-    error: ok ? "" : "Please enter a valid name",
-  };
+  return { ok, value: name, error: ok ? "" : "Please enter a valid name" };
 }
 
-/** Basic email validation (good enough for UI) */
+/** Basic email validation */
 function validateEmail(raw: string) {
   const email = (raw ?? "").trim();
   const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return { ok, value: email, error: ok ? "" : "Enter a valid email" };
+}
+
+/** Phone validation (simple but effective)
+ * Accepts + country code or local formats (we normalize to digits for checking).
+ * If you want strict E.164 only, tell me and I’ll enforce +XXXXXXXX.
+ */
+function validatePhone(raw: string) {
+  const phone = (raw ?? "").trim();
+  const digits = phone.replace(/[^\d+]/g, ""); // keep digits and +
+  const justDigits = digits.replace(/\+/g, "");
+
+  // allow 8–15 digits (covers most countries)
+  const ok = justDigits.length >= 8 && justDigits.length <= 15;
+
   return {
     ok,
-    value: email,
-    error: ok ? "" : "Enter a valid email",
+    value: phone,
+    error: ok ? "" : "Enter a valid phone number",
   };
 }
 
@@ -48,8 +54,16 @@ function isDisposableEmail(email: string) {
   return disposable.some((d) => e.includes(d));
 }
 
+function firstNameFrom(full: string) {
+  const s = (full ?? "").trim();
+  if (!s) return "";
+  return s.split(/\s+/)[0];
+}
+
 const JazzyWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
+
+  // Chat
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,6 +73,7 @@ const JazzyWidget: React.FC = () => {
   const [leadGate, setLeadGate] = useState(true);
   const [leadName, setLeadName] = useState("");
   const [leadEmail, setLeadEmail] = useState("");
+  const [leadPhone, setLeadPhone] = useState(""); // ✅ NEW
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [leadError, setLeadError] = useState("");
 
@@ -104,9 +119,7 @@ const JazzyWidget: React.FC = () => {
     AUTO SCROLL CHAT
   ---------------------------------------------------------------------- */
   useEffect(() => {
-    if (chatRef.current) {
-      chatRef.current.scrollTop = chatRef.current.scrollHeight;
-    }
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
   /* ----------------------------------------------------------------------
@@ -115,11 +128,8 @@ const JazzyWidget: React.FC = () => {
   const ensureTurnstileScript = () =>
     new Promise<void>((resolve, reject) => {
       if (typeof window === "undefined") return resolve();
-
-      // Already loaded
       if (window.turnstile) return resolve();
 
-      // If script tag already exists, wait a bit for it to initialize
       const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`);
       if (existing) {
         const check = setInterval(() => {
@@ -131,8 +141,7 @@ const JazzyWidget: React.FC = () => {
 
         setTimeout(() => {
           clearInterval(check);
-          if (!window.turnstile)
-            reject(new Error("Turnstile script loaded but window.turnstile not available"));
+          if (!window.turnstile) reject(new Error("Turnstile loaded but not initialized"));
         }, 4000);
 
         return;
@@ -148,7 +157,7 @@ const JazzyWidget: React.FC = () => {
     });
 
   /* ----------------------------------------------------------------------
-    RENDER TURNSTILE WIDGET (SAFE)
+    RENDER TURNSTILE WIDGET
   ---------------------------------------------------------------------- */
   const renderTurnstile = async () => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
@@ -160,19 +169,16 @@ const JazzyWidget: React.FC = () => {
 
     try {
       await ensureTurnstileScript();
-
       if (!window.turnstile) {
         setLeadError("Captcha failed to initialize. Please refresh.");
         return;
       }
 
-      // Render only once per open session
       if (turnstileRenderedRef.current && turnstileWidgetIdRef.current) return;
 
       const container = document.getElementById("cf-turnstile");
       if (!container) return;
 
-      // Clear container to avoid duplicate widgets
       container.innerHTML = "";
 
       const widgetId = window.turnstile.render(container, {
@@ -180,10 +186,7 @@ const JazzyWidget: React.FC = () => {
         size: "invisible",
         callback: (token: string) => validateLead(token),
         "error-callback": () => setLeadError("Captcha failed. Please try again."),
-        "expired-callback": () => {
-          setLeadError("Captcha expired. Please try again.");
-          if (turnstileWidgetIdRef.current) window.turnstile.reset(turnstileWidgetIdRef.current);
-        },
+        "expired-callback": () => setLeadError("Captcha expired. Please try again."),
       });
 
       turnstileWidgetIdRef.current = widgetId;
@@ -194,22 +197,14 @@ const JazzyWidget: React.FC = () => {
     }
   };
 
-  /* ----------------------------------------------------------------------
-    RESET TURNSTILE
-  ---------------------------------------------------------------------- */
   const resetTurnstile = () => {
     try {
       if (window.turnstile && turnstileWidgetIdRef.current) {
         window.turnstile.reset(turnstileWidgetIdRef.current);
       }
-    } catch {
-      // ignore
-    }
+    } catch {}
   };
 
-  /* ----------------------------------------------------------------------
-    WHEN MODAL OPENS, PREP TURNSTILE
-  ---------------------------------------------------------------------- */
   useEffect(() => {
     if (open && leadGate) {
       setLeadError("");
@@ -219,33 +214,36 @@ const JazzyWidget: React.FC = () => {
   }, [open, leadGate]);
 
   /* ----------------------------------------------------------------------
-    LOCAL LEAD VALIDATION (RUN BEFORE CAPTCHA)
+    LOCAL LEAD VALIDATION
   ---------------------------------------------------------------------- */
   const validateLeadLocal = () => {
     const n = validateName(leadName);
-    if (!n.ok) return { ok: false, error: n.error };
+    if (!n.ok) return { ok: false as const, error: n.error };
 
     const e = validateEmail(leadEmail);
-    if (!e.ok) return { ok: false, error: e.error };
+    if (!e.ok) return { ok: false as const, error: e.error };
 
-    if (isDisposableEmail(e.value)) return { ok: false, error: "Disposable emails are not allowed." };
+    if (isDisposableEmail(e.value)) return { ok: false as const, error: "Disposable emails are not allowed." };
 
-    if (!acceptedTerms) return { ok: false, error: "Please agree to the Terms & Privacy Policy." };
+    const p = validatePhone(leadPhone);
+    if (!p.ok) return { ok: false as const, error: p.error };
 
-    // normalize stored values (optional but recommended)
-    if (n.value !== leadName) setLeadName(n.value);
-    if (e.value !== leadEmail) setLeadEmail(e.value);
+    if (!acceptedTerms) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy." };
+
+    // normalize stored values
+    if (leadName !== n.value) setLeadName(n.value);
+    if (leadEmail !== e.value) setLeadEmail(e.value);
+    if (leadPhone !== p.value) setLeadPhone(p.value);
 
     return { ok: true as const };
   };
 
   /* ----------------------------------------------------------------------
-    LEAD VALIDATION + TURNSTILE SERVER CHECK
+    TURNSTILE SERVER CHECK THEN OPEN CHAT
   ---------------------------------------------------------------------- */
   const validateLead = async (token: string) => {
     setLeadError("");
 
-    // Safety check (in case user bypasses UI flow)
     const local = validateLeadLocal();
     if (!local.ok) {
       setLeadError(local.error);
@@ -267,58 +265,46 @@ const JazzyWidget: React.FC = () => {
       });
 
       if (!r.ok) {
-        console.error("[Jazzy] verify-turnstile not OK:", r.status);
         setLeadError("Captcha failed. Please try again.");
         resetTurnstile();
         return;
       }
 
       const j = await r.json().catch(() => null);
-
       if (!j?.success) {
         setLeadError("Captcha failed. Try again.");
         resetTurnstile();
         return;
       }
 
-      // ✅ Success → open chat
       setLeadGate(false);
 
+      const fn = firstNameFrom(leadName);
       setMessages([
         {
           id: "welcome-" + Date.now(),
           role: "assistant",
-          content: "Hey! I'm Jazzy 👋 How can I help you today?",
+          content: `Hey ${fn || "there"}! I'm Jazzy 👋 Tell me what you need and I’ll help you fast.`,
         },
       ]);
     } catch (err) {
-      console.error("[Jazzy] verify-turnstile request error:", err);
+      console.error("[Jazzy] verify-turnstile error:", err);
       setLeadError("Network error. Please try again.");
       resetTurnstile();
     }
   };
 
   /* ----------------------------------------------------------------------
-    SPEAK RESPONSE
-  ---------------------------------------------------------------------- */
-  const speak = (text: string) => {
-    const s = window.speechSynthesis;
-    if (!s) return;
-
-    const u = new SpeechSynthesisUtterance(text);
-    u.pitch = 1;
-    u.rate = 1;
-    s.speak(u);
-  };
-
-  /* ----------------------------------------------------------------------
-    SEND MESSAGE TO API (/api/jazzy-lead)
+    SEND MESSAGE TO API (WITH HISTORY ✅)
   ---------------------------------------------------------------------- */
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
 
-    setMessages((prev) => [...prev, { id: Date.now() + "", role: "user", content: text }]);
+    const newUserMsg: Message = { id: Date.now() + "", role: "user", content: text };
+    const nextMessages = [...messages, newUserMsg];
+
+    setMessages(nextMessages);
     setInput("");
     setLoading(true);
 
@@ -327,50 +313,46 @@ const JazzyWidget: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: leadName,
-          email: leadEmail,
-          topic: selectedTopic,
+          lead: {
+            name: leadName,
+            email: leadEmail,
+            phone: leadPhone, // ✅ NEW
+            topic: selectedTopic,
+          },
           message: text,
+          history: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })), // ✅ STOP REPEATS
           pageUrl: typeof window !== "undefined" ? window.location.href : "",
         }),
       });
 
       if (!res.ok) {
-        console.error("[Jazzy] /api/jazzy-lead not OK:", res.status);
-
-        const fallback =
-          "I'm having trouble connecting right now. A human from Digitalboxes will follow up with you shortly.";
-
-        setMessages((prev) => [...prev, { id: Date.now() + "-jazzy-error", role: "assistant", content: fallback }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Date.now() + "-jazzy-error",
+            role: "assistant",
+            content: "I’m having trouble connecting right now. A human from Digitalboxes will follow up shortly.",
+          },
+        ]);
         return;
       }
 
       const data = await res.json().catch(() => null);
-
       const reply: string =
-        data?.reply ||
-        "Thanks for the details! A member of the Digitalboxes team will follow up with you soon.";
+        data?.reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
 
       setMessages((prev) => [...prev, { id: Date.now() + "-jazzy", role: "assistant", content: reply }]);
-      speak(reply);
     } catch (err) {
       console.error("[Jazzy] sendMessage error:", err);
       setMessages((prev) => [
         ...prev,
-        {
-          id: Date.now() + "-jazzy-fail",
-          role: "assistant",
-          content: "Looks like the connection dropped. Please try again in a moment.",
-        },
+        { id: Date.now() + "-jazzy-fail", role: "assistant", content: "Connection dropped. Please try again." },
       ]);
     } finally {
       setLoading(false);
     }
   };
 
-  /* ----------------------------------------------------------------------
-    MIC
-  ---------------------------------------------------------------------- */
   const toggleMic = () => {
     if (!recognitionRef.current) return;
     if (listening) recognitionRef.current.stop();
@@ -378,19 +360,9 @@ const JazzyWidget: React.FC = () => {
     setListening(!listening);
   };
 
-  /* ----------------------------------------------------------------------
-    END CHAT
-  ---------------------------------------------------------------------- */
   const endChat = () => setShowSurvey(true);
+  const submitSurvey = () => setShowSurvey(false);
 
-  const submitSurvey = () => {
-    console.log("Survey Submitted:", rating, reviewText);
-    setShowSurvey(false);
-  };
-
-  /* ----------------------------------------------------------------------
-    CLOSE WIDGET (RESET NICE)
-  ---------------------------------------------------------------------- */
   const closeWidget = () => {
     setOpen(false);
     setShowSurvey(false);
@@ -399,14 +371,10 @@ const JazzyWidget: React.FC = () => {
     setListening(false);
     setLeadError("");
 
-    // reset turnstile flags (so it re-renders next time)
     turnstileRenderedRef.current = false;
     turnstileWidgetIdRef.current = null;
   };
 
-  /* ----------------------------------------------------------------------
-    RENDER UI
-  ---------------------------------------------------------------------- */
   return (
     <>
       {/* FLOATING BUTTON */}
@@ -451,6 +419,17 @@ const JazzyWidget: React.FC = () => {
             }}
           />
 
+          {/* ✅ NEW PHONE FIELD */}
+          <input
+            className="border w-full p-2 rounded mb-2 text-sm"
+            placeholder="Phone (WhatsApp preferred)"
+            value={leadPhone}
+            onChange={(e) => {
+              setLeadPhone(e.target.value);
+              if (leadError) setLeadError("");
+            }}
+          />
+
           <div className="flex gap-2 mb-2 text-xs flex-wrap">
             {["Marketing & Services", "Free AI / SEO Tools", "Something Else"].map((t) => (
               <button
@@ -475,10 +454,9 @@ const JazzyWidget: React.FC = () => {
                 if (leadError) setLeadError("");
               }}
             />
-            I agree to the Terms &amp; Privacy Policy.
+            I accept the Terms &amp; Conditions and Privacy Policy.
           </label>
 
-          {/* Turnstile container (rendered via turnstile.render) */}
           <div id="cf-turnstile" />
 
           {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
@@ -488,20 +466,17 @@ const JazzyWidget: React.FC = () => {
             onClick={() => {
               setLeadError("");
 
-              // ✅ Validate locally FIRST (prevents “Invalid name” + saves captcha calls)
               const local = validateLeadLocal();
               if (!local.ok) {
                 setLeadError(local.error);
                 return;
               }
 
-              // Render if not rendered yet
               if (!turnstileRenderedRef.current) {
                 renderTurnstile();
                 return;
               }
 
-              // Execute using widgetId
               if (window.turnstile && turnstileWidgetIdRef.current) {
                 window.turnstile.execute(turnstileWidgetIdRef.current);
               } else {
@@ -510,7 +485,7 @@ const JazzyWidget: React.FC = () => {
             }}
             className="w-full bg-blue-600 text-white py-2 rounded text-sm"
           >
-            Continue to Chat
+            Continue to chat
           </button>
         </div>
       )}
@@ -526,7 +501,7 @@ const JazzyWidget: React.FC = () => {
             </div>
 
             <button className="ml-auto text-xs text-gray-600 hover:text-gray-900" onClick={endChat}>
-              End Chat
+              End chat
             </button>
 
             <button className="ml-2 text-xs text-gray-600 hover:text-gray-900" onClick={closeWidget}>
@@ -555,7 +530,6 @@ const JazzyWidget: React.FC = () => {
                 listening ? "bg-red-100 border-red-400" : ""
               }`}
               type="button"
-              aria-label="Toggle microphone"
             >
               🎤
             </button>
@@ -564,7 +538,7 @@ const JazzyWidget: React.FC = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              placeholder="Ask Jazzy…"
+              placeholder="Type your question…"
               className="flex-1 border rounded-full px-3 py-2 text-xs"
             />
 
