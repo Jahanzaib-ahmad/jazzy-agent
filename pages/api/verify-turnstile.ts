@@ -1,60 +1,47 @@
 // pages/api/verify-turnstile.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 
-const { TURNSTILE_SECRET_KEY } = process.env;
+export const config = {
+  api: { bodyParser: { sizeLimit: "256kb" } },
+};
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ success: false, error: "Method not allowed" });
-  }
-
   try {
-    if (!TURNSTILE_SECRET_KEY) {
-      return res
-        .status(500)
-        .json({ success: false, error: "Missing TURNSTILE_SECRET_KEY" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ success: false });
 
-    const { token } = req.body || {};
-    if (!token) {
-      return res.status(400).json({ success: false, error: "Missing token" });
+    const token = String(req.body?.token || "").trim();
+    if (!token) return res.status(400).json({ success: false, error: "Missing token" });
+
+    const secret = process.env.TURNSTILE_SECRET_KEY;
+    if (!secret) {
+      return res.status(500).json({
+        success: false,
+        error: "Missing TURNSTILE_SECRET_KEY in server env",
+      });
     }
 
     const ip =
       (req.headers["cf-connecting-ip"] as string) ||
-      (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
-      req.socket.remoteAddress;
+      (req.headers["x-forwarded-for"] as string) ||
+      "";
 
-    const formData = new URLSearchParams();
-    formData.append("secret", TURNSTILE_SECRET_KEY);
-    formData.append("response", token);
-    if (ip) formData.append("remoteip", ip);
+    const form = new URLSearchParams();
+    form.append("secret", secret);
+    form.append("response", token);
+    if (ip) form.append("remoteip", ip.split(",")[0].trim());
 
-    const resp = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: formData.toString(),
+      body: form.toString(),
     });
 
-    const data = await resp.json();
+    const data = await r.json();
 
-    if (!data?.success) {
-      return res.status(200).json({
-        success: false,
-        error: data?.["error-codes"]?.[0] || "Turnstile verification failed",
-      });
-    }
-
-    return res.status(200).json({ success: true });
-  } catch (e: any) {
-    console.error("[verify-turnstile] error:", e);
+    // Cloudflare uses { success: boolean, ... }
+    return res.status(200).json({ success: !!data?.success, data });
+  } catch (e) {
+    console.error("verify-turnstile error:", e);
     return res.status(500).json({ success: false, error: "Server error" });
   }
 }
-
-export const config = {
-  api: {
-    bodyParser: { sizeLimit: "1mb" },
-  },
-};
