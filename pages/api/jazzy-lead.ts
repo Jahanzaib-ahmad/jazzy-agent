@@ -238,9 +238,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const pageUrl = body.pageUrl ? cleanStr(body.pageUrl, 2000) : undefined;
 
     // Validation
-    if (!lead.name || lead.name.length < 2) {
-      return res.status(400).json({ success: false, error: "Invalid name" });
-    }
+    if (!lead.name || lead.name.trim().length < 2) {
+  return res.status(400).json({
+    success: false,
+    error: "Invalid name",
+  });
+}
     if (!isValidEmail(lead.email)) {
       return res.status(400).json({ success: false, error: "Invalid email" });
     }

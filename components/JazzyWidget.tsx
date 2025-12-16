@@ -17,21 +17,26 @@ const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api
 
 /** 🌍 Global-safe name validator */
 function validateName(raw: string) {
-  const name = (raw || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const name = (raw || "").replace(/\s+/g, " ").trim();
 
-  // Allow letters, spaces, dots, hyphens — global safe
-  const ok =
-    name.length >= 2 &&
-    name.length <= 60 &&
-    /^[A-Za-zÀ-ÖØ-öø-ÿ\s.'-]+$/.test(name);
+  // Must be 2–60 chars
+  if (name.length < 2 || name.length > 60) {
+    return { ok: false, value: name, error: "Please enter a valid full name" };
+  }
 
-  return {
-    ok,
-    value: name,
-    error: ok ? "" : "Please enter a valid full name",
-  };
+  // Must contain at least one letter (any language)
+  // This avoids Unicode property regex issues across environments.
+  const hasLetter = /[A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF]/.test(name);
+  if (!hasLetter) {
+    return { ok: false, value: name, error: "Please enter a valid full name" };
+  }
+
+  // Block obvious junk characters (numbers + common symbols)
+  if (/[0-9!@#$%^&*()_=+\[\]{};:"\\|<>/?]/.test(name)) {
+    return { ok: false, value: name, error: "Please enter a valid full name" };
+  }
+
+  return { ok: true, value: name, error: "" };
 }
 
 /** Basic email validation */
