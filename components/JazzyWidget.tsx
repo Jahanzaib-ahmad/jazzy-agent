@@ -15,24 +15,30 @@ declare global {
 
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
 
-/** 🌍 Global-safe name validator */
+/** Normalize multiple spaces */
+function normalizeSpaces(raw: string) {
+  return (raw || "").replace(/\s+/g, " ").trim();
+}
+
+/** 🌍 Global-safe FULL-NAME validator (first + last) */
 function validateName(raw: string) {
-  const name = (raw || "").replace(/\s+/g, " ").trim();
+  const name = normalizeSpaces(raw);
 
-  // Must be 2–60 chars
-  if (name.length < 2 || name.length > 60) {
+  // Must be 3–60 chars (2 is too short for "full name")
+  if (name.length < 3 || name.length > 60) {
     return { ok: false, value: name, error: "Please enter a valid full name" };
   }
 
-  // Must contain at least one letter (any language)
-  // This avoids Unicode property regex issues across environments.
-  const hasLetter = /[A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF]/.test(name);
-  if (!hasLetter) {
-    return { ok: false, value: name, error: "Please enter a valid full name" };
+  // Must be at least 2 words (first + last)
+  const parts = name.split(" ").filter(Boolean);
+  if (parts.length < 2) {
+    return { ok: false, value: name, error: "Please enter your first and last name" };
   }
 
-  // Block obvious junk characters (numbers + common symbols)
-  if (/[0-9!@#$%^&*()_=+\[\]{};:"\\|<>/?]/.test(name)) {
+  // Allow letters (English + Latin accents + Arabic/Urdu) + common name chars
+  // ✅ This avoids Unicode property regex issues in some environments.
+  const allowed = /^[A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF.'-]+(?: [A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF.'-]+)+$/;
+  if (!allowed.test(name)) {
     return { ok: false, value: name, error: "Please enter a valid full name" };
   }
 
@@ -46,13 +52,31 @@ function validateEmail(raw: string) {
   return { ok, value: email, error: ok ? "" : "Enter a valid email" };
 }
 
-/** Phone validation (8–15 digits) */
+/** Phone validation (must include country code, E.164 like +923111090222) */
 function validatePhone(raw: string) {
-  const phone = (raw ?? "").trim();
-  const digits = phone.replace(/[^\d+]/g, "");
-  const justDigits = digits.replace(/\+/g, "");
-  const ok = justDigits.length >= 8 && justDigits.length <= 15;
-  return { ok, value: phone, error: ok ? "" : "Enter a valid phone number" };
+  const input = (raw ?? "").trim();
+
+  // Keep + and digits only
+  const cleaned = input.replace(/[^\d+]/g, "");
+
+  // Must start with +
+  if (!cleaned.startsWith("+")) {
+    return { ok: false, value: input, error: "Phone must include country code, e.g. +923111090222" };
+  }
+
+  // Only one + allowed and then digits
+  if (!/^\+\d+$/.test(cleaned)) {
+    return { ok: false, value: input, error: "Enter a valid phone number with country code" };
+  }
+
+  const digitsOnly = cleaned.slice(1); // remove +
+  const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
+
+  return {
+    ok,
+    value: cleaned,
+    error: ok ? "" : "Phone must be 8–15 digits after + (e.g. +923111090222)",
+  };
 }
 
 function isDisposableEmail(email: string) {
@@ -210,8 +234,14 @@ const JazzyWidget: React.FC = () => {
         sitekey: siteKey,
         size: "invisible",
         callback: (token: string) => validateLead(token),
-        "error-callback": () => setLeadError("Captcha failed. Please try again."),
-        "expired-callback": () => setLeadError("Captcha expired. Please try again."),
+        "error-callback": () => {
+          setLeadError("Captcha failed. Please try again.");
+          resetTurnstile();
+        },
+        "expired-callback": () => {
+          setLeadError("Captcha expired. Please try again.");
+          resetTurnstile();
+        },
       });
 
       turnstileWidgetIdRef.current = widgetId;
@@ -475,7 +505,7 @@ const JazzyWidget: React.FC = () => {
 
           <input
             className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Your full name"
+            placeholder="Full name (first + last)"
             value={leadName}
             onChange={(e) => {
               setLeadName(e.target.value);
@@ -496,7 +526,7 @@ const JazzyWidget: React.FC = () => {
 
           <input
             className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Phone (WhatsApp preferred)"
+            placeholder="Phone with country code (e.g. +923111090222)"
             value={leadPhone}
             onChange={(e) => {
               setLeadPhone(e.target.value);
