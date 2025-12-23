@@ -38,41 +38,28 @@ function validateEmail(raw: string) {
 /**
  * ✅ Phone validation (relaxed):
  * Accepts:
- *  - +923111090222 (E.164)
- *  - 033112447003  (local)
- *  - 33112447003   (digits only)
+ *  - +923111090222
+ *  - 033112447003
+ *  - 33112447003
  */
 function validatePhone(raw: string) {
   const input = (raw ?? "").trim();
-  if (!input) {
-    return { ok: false, value: input, error: "Please enter your phone number" };
-  }
+  if (!input) return { ok: false, value: input, error: "Please enter your phone number" };
 
-  // keep + and digits
   const cleaned = input.replace(/[^\d+]/g, "");
 
-  // If it starts with + => E.164 style
   if (cleaned.startsWith("+")) {
     if (!/^\+\d+$/.test(cleaned)) {
       return { ok: false, value: input, error: "Enter a valid phone number (digits only after +)" };
     }
     const digitsOnly = cleaned.slice(1);
     const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
-    return {
-      ok,
-      value: cleaned,
-      error: ok ? "" : "Phone must be 8–15 digits after +",
-    };
+    return { ok, value: cleaned, error: ok ? "" : "Phone must be 8–15 digits after +" };
   }
 
-  // Otherwise accept local digits
   const digitsOnly = cleaned.replace(/[^\d]/g, "");
   const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
-  return {
-    ok,
-    value: digitsOnly,
-    error: ok ? "" : "Enter a valid phone number",
-  };
+  return { ok, value: digitsOnly, error: ok ? "" : "Enter a valid phone number" };
 }
 
 function isDisposableEmail(email: string) {
@@ -102,7 +89,7 @@ function shouldAskForReview(text: string) {
   );
 }
 
-const AVATAR_SRC = "/jazzy-avatar.png"; // put in /public/jazzy-avatar.png
+const AVATAR_SRC = "/jazzy-avatar.png";
 
 const JazzyWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
@@ -133,10 +120,11 @@ const JazzyWidget: React.FC = () => {
   const chatRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  // ✅ Input refs (fixes the “name filled but still error” bug)
+  // ✅ Refs to always read REAL values (fixes timing bugs)
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
+  const termsRef = useRef<HTMLInputElement | null>(null);
 
   // Turnstile
   const turnstileWidgetIdRef = useRef<string | null>(null);
@@ -268,21 +256,22 @@ const JazzyWidget: React.FC = () => {
   }, [open, leadGate]);
 
   /* ----------------------------------------------------------------------
-    LOCAL LEAD VALIDATION (uses REAL input values)
+    LOCAL LEAD VALIDATION (uses REF values + termsRef)
   ---------------------------------------------------------------------- */
-  const validateLeadLocal = (nameRaw: string, emailRaw: string, phoneRaw: string) => {
+  const validateLeadLocal = (nameRaw: string, emailRaw: string, phoneRaw: string, termsChecked: boolean) => {
     const n = validateName(nameRaw);
-    if (!n.ok) return { ok: false as const, error: n.error, n, e: null, p: null };
+    if (!n.ok) return { ok: false as const, error: n.error, n: null, e: null, p: null };
 
     const e = validateEmail(emailRaw);
-    if (!e.ok) return { ok: false as const, error: e.error, n, e, p: null };
+    if (!e.ok) return { ok: false as const, error: e.error, n, e: null, p: null };
 
     if (isDisposableEmail(e.value)) return { ok: false as const, error: "Disposable emails are not allowed.", n, e, p: null };
 
     const p = validatePhone(phoneRaw);
-    if (!p.ok) return { ok: false as const, error: p.error, n, e, p };
+    if (!p.ok) return { ok: false as const, error: p.error, n, e, p: null };
 
-    if (!acceptedTerms) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy.", n, e, p };
+    // ✅ THIS is the bug: don't rely on acceptedTerms state
+    if (!termsChecked) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy.", n, e, p };
 
     return { ok: true as const, n, e, p };
   };
@@ -293,12 +282,14 @@ const JazzyWidget: React.FC = () => {
   const validateLead = async (token: string) => {
     setLeadError("");
 
-    // Use latest input values (refs)
     const nameVal = nameInputRef.current?.value ?? leadName;
     const emailVal = emailInputRef.current?.value ?? leadEmail;
     const phoneVal = phoneInputRef.current?.value ?? leadPhone;
 
-    const local = validateLeadLocal(nameVal, emailVal, phoneVal);
+    // ✅ Read the REAL checkbox checked state
+    const termsChecked = termsRef.current?.checked ?? acceptedTerms;
+
+    const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
     if (!local.ok) {
       setLeadError(local.error);
       resetTurnstile();
@@ -309,6 +300,7 @@ const JazzyWidget: React.FC = () => {
     setLeadName(local.n.value);
     setLeadEmail(local.e.value);
     setLeadPhone(local.p.value);
+    setAcceptedTerms(termsChecked);
 
     if (!token) {
       setLeadError("Captcha verification failed.");
@@ -336,7 +328,6 @@ const JazzyWidget: React.FC = () => {
         return;
       }
 
-      // ✅ Success → open chat
       setLeadGate(false);
 
       const fn = firstNameFrom(local.n.value) || "there";
@@ -373,12 +364,7 @@ const JazzyWidget: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lead: {
-            name: leadName,
-            email: leadEmail,
-            phone: leadPhone,
-            topic: selectedTopic,
-          },
+          lead: { name: leadName, email: leadEmail, phone: leadPhone, topic: selectedTopic },
           message: text,
           history: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })),
           pageUrl: typeof window !== "undefined" ? window.location.href : "",
@@ -399,7 +385,6 @@ const JazzyWidget: React.FC = () => {
 
       const data = await res.json().catch(() => null);
       const reply: string = data?.reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
-
       setMessages((prev) => [...prev, { id: Date.now() + "-jazzy", role: "assistant", content: reply }]);
 
       if (!askedForReview && shouldAskForReview(text)) {
@@ -476,7 +461,6 @@ const JazzyWidget: React.FC = () => {
         role="button"
         aria-label="Open Jazzy chat"
       >
-        {/* ✅ Avatar like your example + wave badge */}
         <div className="jazzyAvatarWrap">
           <img
             src={AVATAR_SRC}
@@ -528,7 +512,7 @@ const JazzyWidget: React.FC = () => {
           <input
             ref={phoneInputRef}
             className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Phone (e.g. +923111090222 or 033112447003)"
+            placeholder="Phone (e.g. +923... or 033...)"
             value={leadPhone}
             onChange={(e) => {
               setLeadPhone(e.target.value);
@@ -553,6 +537,7 @@ const JazzyWidget: React.FC = () => {
 
           <label className="text-xs flex items-center gap-2 mb-2">
             <input
+              ref={termsRef}
               type="checkbox"
               checked={acceptedTerms}
               onChange={(e) => {
@@ -564,7 +549,6 @@ const JazzyWidget: React.FC = () => {
           </label>
 
           <div className="text-[11px] text-gray-500 mb-2">Protected by Cloudflare Turnstile.</div>
-
           <div id="cf-turnstile" />
 
           {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
@@ -577,17 +561,18 @@ const JazzyWidget: React.FC = () => {
               const nameVal = nameInputRef.current?.value ?? leadName;
               const emailVal = emailInputRef.current?.value ?? leadEmail;
               const phoneVal = phoneInputRef.current?.value ?? leadPhone;
+              const termsChecked = termsRef.current?.checked ?? acceptedTerms;
 
-              const local = validateLeadLocal(nameVal, emailVal, phoneVal);
+              const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
               if (!local.ok) {
                 setLeadError(local.error);
                 return;
               }
 
-              // sync normalized values before captcha execute
               setLeadName(local.n.value);
               setLeadEmail(local.e.value);
               setLeadPhone(local.p.value);
+              setAcceptedTerms(termsChecked);
 
               if (!turnstileRenderedRef.current) {
                 renderTurnstile();
@@ -636,11 +621,7 @@ const JazzyWidget: React.FC = () => {
               End chat
             </button>
 
-            <button
-              className="ml-2 text-xs text-gray-600 hover:text-gray-900 active:scale-95 transition-transform duration-150"
-              onClick={closeWidget}
-              type="button"
-            >
+            <button className="ml-2 text-xs text-gray-600 hover:text-gray-900 active:scale-95 transition-transform duration-150" onClick={closeWidget} type="button">
               Close
             </button>
           </div>
@@ -658,12 +639,7 @@ const JazzyWidget: React.FC = () => {
                     }}
                   />
                 )}
-
-                <div
-                  className={`px-3 py-2 rounded-xl max-w-[75%] whitespace-pre-line ${
-                    m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-900"
-                  }`}
-                >
+                <div className={`px-3 py-2 rounded-xl max-w-[75%] whitespace-pre-line ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-900"}`}>
                   {m.content}
                 </div>
               </div>
@@ -673,9 +649,7 @@ const JazzyWidget: React.FC = () => {
           <div className="p-2 border-t flex items-center gap-2">
             <button
               onClick={toggleMic}
-              className={`h-8 w-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform duration-150 ${
-                listening ? "bg-red-100 border-red-400" : ""
-              }`}
+              className={`h-8 w-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform duration-150 ${listening ? "bg-red-100 border-red-400" : ""}`}
               type="button"
               aria-label="Toggle microphone"
             >
@@ -721,33 +695,18 @@ const JazzyWidget: React.FC = () => {
             ))}
           </div>
 
-          <textarea
-            className="border w-full p-2 rounded text-sm mb-2"
-            placeholder="Any feedback?"
-            value={reviewText}
-            onChange={(e) => setReviewText(e.target.value)}
-          />
+          <textarea className="border w-full p-2 rounded text-sm mb-2" placeholder="Any feedback?" value={reviewText} onChange={(e) => setReviewText(e.target.value)} />
 
-          <button
-            onClick={submitSurvey}
-            className="bg-blue-600 text-white w-full py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150"
-            type="button"
-            disabled={rating === 0}
-          >
+          <button onClick={submitSurvey} className="bg-blue-600 text-white w-full py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150" type="button" disabled={rating === 0}>
             Submit Feedback
           </button>
 
-          <button
-            onClick={() => setShowSurvey(false)}
-            className="mt-2 w-full text-xs text-gray-600 hover:text-gray-900"
-            type="button"
-          >
+          <button onClick={() => setShowSurvey(false)} className="mt-2 w-full text-xs text-gray-600 hover:text-gray-900" type="button">
             Not now
           </button>
         </div>
       )}
 
-      {/* ✅ CSS for avatar style + wave animation */}
       <style jsx>{`
         .jazzyAvatarWrap {
           width: 42px;
