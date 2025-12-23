@@ -20,26 +20,17 @@ function normalizeSpaces(raw: string) {
   return (raw || "").replace(/\s+/g, " ").trim();
 }
 
-/** 🌍 Global-safe FULL-NAME validator (first + last) */
+/** ✅ NAME VALIDATION (REQUIRED ONLY) — NO FULL NAME RULE */
 function validateName(raw: string) {
   const name = normalizeSpaces(raw);
 
-  // Must be 3–60 chars (2 is too short for "full name")
-  if (name.length < 3 || name.length > 60) {
-    return { ok: false, value: name, error: "Please enter a valid full name" };
+  // Only required + basic length safety (no regex, no first+last)
+  if (!name) {
+    return { ok: false, value: name, error: "Please enter your name" };
   }
 
-  // Must be at least 2 words (first + last)
-  const parts = name.split(" ").filter(Boolean);
-  if (parts.length < 2) {
-    return { ok: false, value: name, error: "Please enter your first and last name" };
-  }
-
-  // Allow letters (English + Latin accents + Arabic/Urdu) + common name chars
-  // ✅ This avoids Unicode property regex issues in some environments.
-  const allowed = /^[A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF.'-]+(?: [A-Za-zÀ-ÖØ-öø-ÿ\u0600-\u06FF.'-]+)+$/;
-  if (!allowed.test(name)) {
-    return { ok: false, value: name, error: "Please enter a valid full name" };
+  if (name.length > 80) {
+    return { ok: false, value: name, error: "Name is too long" };
   }
 
   return { ok: true, value: name, error: "" };
@@ -272,6 +263,7 @@ const JazzyWidget: React.FC = () => {
     LOCAL LEAD VALIDATION
   ---------------------------------------------------------------------- */
   const validateLeadLocal = () => {
+    // ✅ Only required name (no full-name rule)
     const n = validateName(leadName);
     if (!n.ok) return { ok: false as const, error: n.error };
 
@@ -477,7 +469,7 @@ const JazzyWidget: React.FC = () => {
     <>
       {/* FLOATING BUTTON */}
       <div
-        className="fixed bottom-5 right-5 z-50 bg-white border shadow-lg px-3 py-2 rounded-full flex items-center cursor-pointer select-none active:scale-95 transition-transform duration-150"
+        className="fixed bottom-5 right-5 z-[99999] bg-white border shadow-lg px-3 py-2 rounded-full flex items-center cursor-pointer select-none active:scale-95 transition-transform duration-150"
         onClick={() => setOpen(true)}
         role="button"
         aria-label="Open Jazzy chat"
@@ -495,7 +487,7 @@ const JazzyWidget: React.FC = () => {
 
       {/* LEAD FORM */}
       {open && leadGate && (
-        <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-50">
+        <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-[99999]">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-semibold text-lg">Let’s get you to the right place 👋</h3>
             <button onClick={closeWidget} className="text-xs text-gray-500 hover:text-gray-800" type="button">
@@ -505,7 +497,7 @@ const JazzyWidget: React.FC = () => {
 
           <input
             className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Full name (first + last)"
+            placeholder="Name"
             value={leadName}
             onChange={(e) => {
               setLeadName(e.target.value);
@@ -600,7 +592,7 @@ const JazzyWidget: React.FC = () => {
 
       {/* CHAT WINDOW */}
       {open && !leadGate && (
-        <div className="fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-50">
+        <div className="fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-[99999]">
           <div className="p-3 border-b bg-gray-100 flex items-center">
             <img
               src={AVATAR_SRC}
@@ -698,7 +690,7 @@ const JazzyWidget: React.FC = () => {
 
       {/* SURVEY MODAL */}
       {showSurvey && (
-        <div className="fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-50">
+        <div className="fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-[99999]">
           <h3 className="font-semibold mb-2">Rate your experience</h3>
 
           {/* Stars not pre-selected */}
