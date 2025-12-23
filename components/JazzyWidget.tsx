@@ -455,26 +455,28 @@ const JazzyWidget: React.FC = () => {
   return (
     <>
       {/* FLOATING BUTTON */}
-      <div
-        className="fixed bottom-5 right-5 z-[99999] bg-white border shadow-lg px-3 py-2 rounded-full flex items-center cursor-pointer select-none active:scale-95 transition-transform duration-150"
-        onClick={() => setOpen(true)}
-        role="button"
-        aria-label="Open Jazzy chat"
-      >
-        <div className="jazzyAvatarWrap">
-          <img
-            src={AVATAR_SRC}
-            className="jazzyAvatarImg"
-            alt="Jazzy avatar"
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
-            }}
-          />
-          <span className="jazzyWaveBadge" aria-hidden="true">👋</span>
-        </div>
+      
+<div
+  className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
+  onClick={() => setOpen(true)}
+  role="button"
+  aria-label="Open Jazzy chat"
+>
+  <div className="jazzyBtn">
+    <div className="jazzyAvatarFloat">
+      <img
+        src={AVATAR_SRC}
+        className="jazzyAvatarImg"
+        alt="Jazzy avatar"
+        onError={(e) => {
+          (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
+        }}
+      />
+    </div>
 
-        <span className="ml-2 text-sm font-semibold">Chat with Jazzy</span>
-      </div>
+    <span className="jazzyBtnText">Chat with Jazzy</span>
+  </div>
+</div>
 
       {/* LEAD FORM */}
       {open && leadGate && (
@@ -708,46 +710,50 @@ const JazzyWidget: React.FC = () => {
       )}
 
       <style jsx>{`
-        .jazzyAvatarWrap {
-          width: 42px;
-          height: 42px;
-          border-radius: 9999px;
-          overflow: hidden;
-          position: relative;
-          flex: 0 0 auto;
-          background: #0d5bd8;
-          border: 2px solid rgba(13, 91, 216, 0.25);
-          box-shadow: 0 8px 18px rgba(0, 0, 0, 0.15);
-        }
-        .jazzyAvatarImg {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-          display: block;
-        }
-        .jazzyWaveBadge {
-          position: absolute;
-          right: -6px;
-          top: -8px;
-          font-size: 18px;
-          background: #fff;
-          border: 1px solid rgba(0, 0, 0, 0.1);
-          border-radius: 9999px;
-          padding: 2px 6px;
-          transform-origin: 70% 70%;
-          animation: jazzyWave 1.6s ease-in-out infinite;
-        }
-        @keyframes jazzyWave {
-          0% { transform: rotate(0deg); }
-          10% { transform: rotate(14deg); }
-          20% { transform: rotate(-10deg); }
-          30% { transform: rotate(14deg); }
-          40% { transform: rotate(-6deg); }
-          50% { transform: rotate(10deg); }
-          60% { transform: rotate(0deg); }
-          100% { transform: rotate(0deg); }
-        }
-      `}</style>
+  .jazzyBtn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 9999px;
+    padding: 10px 16px 10px 60px;
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+    transition: transform 150ms ease;
+  }
+
+  .jazzyBtn:active {
+    transform: scale(0.97);
+  }
+
+  .jazzyAvatarFloat {
+    position: absolute;
+    left: -16px;
+    bottom: -10px;
+    width: 58px;
+    height: 58px;
+    border-radius: 9999px;
+    overflow: hidden;
+    background: #0d5bd8;
+    border: 3px solid #ffffff;
+    box-shadow: 0 12px 22px rgba(0, 0, 0, 0.25);
+  }
+
+  .jazzyAvatarImg {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .jazzyBtnText {
+    font-size: 14px;
+    font-weight: 700;
+    color: #111827;
+    white-space: nowrap;
+  }
+`}</style>
+
     </>
   );
 };
