@@ -15,10 +15,24 @@ declare global {
 
 const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
 
+function isEmbeddedMode() {
+  if (typeof window === "undefined") return false;
+
+  // widget.js should set this flag when embedding
+  if ((window as any).__JAZZY_EMBED__ === true) return true;
+
+  // fallback: if container exists (widget mounted into a div)
+  if (document.getElementById("jazzy-widget-root")) return true;
+
+  return false;
+}
+
 /** Normalize multiple spaces */
 function normalizeSpaces(raw: string) {
   return (raw || "").replace(/\s+/g, " ").trim();
 }
+
+
 
 /** ✅ NAME VALIDATION: required only */
 function validateName(raw: string) {
@@ -454,29 +468,30 @@ const JazzyWidget: React.FC = () => {
 
   return (
     <>
-      {/* FLOATING BUTTON */}
-      
-<div
-  className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
-  onClick={() => setOpen(true)}
-  role="button"
-  aria-label="Open Jazzy chat"
->
-  <div className="jazzyBtn">
-    <div className="jazzyAvatarFloat">
-      <img
-        src={AVATAR_SRC}
-        className="jazzyAvatarImg"
-        alt="Jazzy avatar"
-        onError={(e) => {
-          (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
-        }}
-      />
-    </div>
+      {/* FLOATING BUTTON (hide in embed mode) */}
+{!isEmbeddedMode() && (
+  <div
+    className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
+    onClick={() => setOpen(true)}
+    role="button"
+    aria-label="Open Jazzy chat"
+  >
+    <div className="jazzyBtn">
+      <div className="jazzyAvatarFloat">
+        <img
+          src={AVATAR_SRC}
+          className="jazzyAvatarImg"
+          alt="Jazzy avatar"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
+          }}
+        />
+      </div>
 
-    <span className="jazzyBtnText">Chat with Jazzy</span>
+      <span className="jazzyBtnText">Chat with Jazzy</span>
+    </div>
   </div>
-</div>
+)}
 
       {/* LEAD FORM */}
       {open && leadGate && (
