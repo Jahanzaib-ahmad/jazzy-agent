@@ -3,6 +3,13 @@
   if (window.__JAZZY_WIDGET_LOADED__) return;
   window.__JAZZY_WIDGET_LOADED__ = true;
 
+  // Cleanup any previous instances (just in case)
+  const oldBtn = document.getElementById("jazzy-launcher");
+  if (oldBtn) oldBtn.remove();
+
+  const oldFrame = document.getElementById("jazzy-frame");
+  if (oldFrame) oldFrame.remove();
+
   const CHAT_URL = "https://agent.digitalboxes.net/jazzy-chat";
 
   // 1) Create avatar launcher button
@@ -69,6 +76,7 @@
   frame.style.zIndex = "999999";
   frame.style.boxShadow = "0 12px 28px rgba(0,0,0,0.22)";
   frame.style.overflow = "hidden";
+  frame.style.background = "transparent";
   frame.setAttribute("title", "Jazzy Chat");
 
   document.body.appendChild(frame);
