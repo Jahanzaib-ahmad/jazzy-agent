@@ -80,7 +80,11 @@ function validatePhone(raw: string) {
     }
     const digitsOnly = cleaned.slice(1);
     const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
-    return { ok, value: cleaned, error: ok ? "" : "Phone must be 8–15 digits after +" };
+    return {
+      ok,
+      value: cleaned,
+      error: ok ? "" : "Phone must be 8–15 digits after +",
+    };
   }
 
   const digitsOnly = cleaned.replace(/[^\d]/g, "");
@@ -159,6 +163,15 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
   // Turnstile
   const turnstileWidgetIdRef = useRef<string | null>(null);
   const turnstileRenderedRef = useRef(false);
+
+  // ✅ Tell parent (widget.js) to close iframe
+  const notifyParentClose = () => {
+    try {
+      if (typeof window !== "undefined" && window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: "JAZZY_CLOSE" }, "*");
+      }
+    } catch {}
+  };
 
   /* ----------------------------------------------------------------------
     SPEECH RECOGNITION
@@ -315,7 +328,6 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     const p = validatePhone(phoneRaw);
     if (!p.ok) return { ok: false as const, error: p.error, n, e, p: null };
 
-    // ✅ don't rely on acceptedTerms state
     if (!termsChecked)
       return {
         ok: false as const,
@@ -347,7 +359,6 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
       return;
     }
 
-    // sync normalized values to state
     setLeadName(local.n.value);
     setLeadEmail(local.e.value);
     setLeadPhone(local.p.value);
@@ -444,7 +455,10 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
       const reply: string =
         data?.reply ||
         "Thanks! A member of the Digitalboxes team will follow up with you soon.";
-      setMessages((prev) => [...prev, { id: Date.now() + "-jazzy", role: "assistant", content: reply }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: Date.now() + "-jazzy", role: "assistant", content: reply },
+      ]);
 
       if (!askedForReview && shouldAskForReview(text)) {
         setAskedForReview(true);
@@ -492,19 +506,16 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
   };
 
   /* ----------------------------------------------------------------------
-    SURVEY
-  ---------------------------------------------------------------------- */
-  const submitSurvey = () => {
-    setShowSurvey(false);
-  };
-
-  /* ----------------------------------------------------------------------
-    CLOSE WIDGET
+    CLOSE WIDGET (fixed for embed)
   ---------------------------------------------------------------------- */
   const closeWidget = () => {
-    // In embed mode, keep "open" true (page should remain visible)
-    if (!EMBED) setOpen(false);
+    if (EMBED) {
+      notifyParentClose(); // ✅ close iframe on parent
+    } else {
+      setOpen(false); // ✅ hide widget on normal site
+    }
 
+    // Reset everything
     setShowSurvey(false);
     setLoading(false);
     setInput("");
@@ -519,6 +530,14 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     setMessages([]);
     setRating(0);
     setReviewText("");
+  };
+
+  /* ----------------------------------------------------------------------
+    SURVEY SUBMIT (fixed) -> close chat
+  ---------------------------------------------------------------------- */
+  const submitSurvey = () => {
+    // If later you want to POST rating/review, do it here before closing
+    closeWidget(); // ✅ this closes chat + iframe
   };
 
   // Layout helpers
@@ -557,7 +576,6 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
                 }}
               />
             </div>
-
             <span className="jazzyBtnText">Chat with Jazzy</span>
           </div>
         </div>
@@ -763,7 +781,12 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
 
           <div className="p-2 border-t flex items-center gap-2">
             <button
-              onClick={toggleMic}
+              onClick={() => {
+                if (!recognitionRef.current) return;
+                if (listening) recognitionRef.current.stop();
+                else recognitionRef.current.start();
+                setListening(!listening);
+              }}
               className={`h-8 w-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform duration-150 ${
                 listening ? "bg-red-100 border-red-400" : ""
               }`}
