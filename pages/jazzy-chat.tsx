@@ -1,4 +1,6 @@
 // pages/jazzy-chat.tsx
+import JazzyWidget from "../components/JazzyWidget";
+
 export default function JazzyChatPage() {
-  return <div style={{ minHeight: "100vh" }} />;
+  return <JazzyWidget embed />;
 }

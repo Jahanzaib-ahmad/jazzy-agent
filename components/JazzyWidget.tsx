@@ -13,16 +13,24 @@ declare global {
   }
 }
 
-const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+const TURNSTILE_SCRIPT_SRC =
+  "https://challenges.cloudflare.com/turnstile/v0/api.js";
 
 function isEmbeddedMode() {
   if (typeof window === "undefined") return false;
 
-  // widget.js should set this flag when embedding
+  // widget.js can set this flag when embedding (optional)
   if ((window as any).__JAZZY_EMBED__ === true) return true;
 
   // fallback: if container exists (widget mounted into a div)
   if (document.getElementById("jazzy-widget-root")) return true;
+
+  // fallback: iframe detection
+  try {
+    if (window.self !== window.top) return true;
+  } catch {
+    return true;
+  }
 
   return false;
 }
@@ -32,13 +40,12 @@ function normalizeSpaces(raw: string) {
   return (raw || "").replace(/\s+/g, " ").trim();
 }
 
-
-
 /** ✅ NAME VALIDATION: required only */
 function validateName(raw: string) {
   const name = normalizeSpaces(raw);
   if (!name) return { ok: false, value: name, error: "Please enter your name" };
-  if (name.length > 80) return { ok: false, value: name, error: "Name is too long" };
+  if (name.length > 80)
+    return { ok: false, value: name, error: "Name is too long" };
   return { ok: true, value: name, error: "" };
 }
 
@@ -58,13 +65,18 @@ function validateEmail(raw: string) {
  */
 function validatePhone(raw: string) {
   const input = (raw ?? "").trim();
-  if (!input) return { ok: false, value: input, error: "Please enter your phone number" };
+  if (!input)
+    return { ok: false, value: input, error: "Please enter your phone number" };
 
   const cleaned = input.replace(/[^\d+]/g, "");
 
   if (cleaned.startsWith("+")) {
     if (!/^\+\d+$/.test(cleaned)) {
-      return { ok: false, value: input, error: "Enter a valid phone number (digits only after +)" };
+      return {
+        ok: false,
+        value: input,
+        error: "Enter a valid phone number (digits only after +)",
+      };
     }
     const digitsOnly = cleaned.slice(1);
     const ok = digitsOnly.length >= 8 && digitsOnly.length <= 15;
@@ -105,8 +117,12 @@ function shouldAskForReview(text: string) {
 
 const AVATAR_SRC = "/jazzy-avatar.png";
 
-const JazzyWidget: React.FC = () => {
-  const [open, setOpen] = useState(false);
+type Props = { embed?: boolean };
+
+const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
+  const EMBED = embed || isEmbeddedMode();
+
+  const [open, setOpen] = useState(EMBED ? true : false);
 
   // Chat
   const [input, setInput] = useState("");
@@ -148,7 +164,8 @@ const JazzyWidget: React.FC = () => {
     SPEECH RECOGNITION
   ---------------------------------------------------------------------- */
   useEffect(() => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
@@ -180,7 +197,9 @@ const JazzyWidget: React.FC = () => {
       if (typeof window === "undefined") return resolve();
       if (window.turnstile) return resolve();
 
-      const existing = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`);
+      const existing = document.querySelector(
+        `script[src="${TURNSTILE_SCRIPT_SRC}"]`
+      );
       if (existing) {
         const check = setInterval(() => {
           if (window.turnstile) {
@@ -272,20 +291,39 @@ const JazzyWidget: React.FC = () => {
   /* ----------------------------------------------------------------------
     LOCAL LEAD VALIDATION (uses REF values + termsRef)
   ---------------------------------------------------------------------- */
-  const validateLeadLocal = (nameRaw: string, emailRaw: string, phoneRaw: string, termsChecked: boolean) => {
+  const validateLeadLocal = (
+    nameRaw: string,
+    emailRaw: string,
+    phoneRaw: string,
+    termsChecked: boolean
+  ) => {
     const n = validateName(nameRaw);
     if (!n.ok) return { ok: false as const, error: n.error, n: null, e: null, p: null };
 
     const e = validateEmail(emailRaw);
     if (!e.ok) return { ok: false as const, error: e.error, n, e: null, p: null };
 
-    if (isDisposableEmail(e.value)) return { ok: false as const, error: "Disposable emails are not allowed.", n, e, p: null };
+    if (isDisposableEmail(e.value))
+      return {
+        ok: false as const,
+        error: "Disposable emails are not allowed.",
+        n,
+        e,
+        p: null,
+      };
 
     const p = validatePhone(phoneRaw);
     if (!p.ok) return { ok: false as const, error: p.error, n, e, p: null };
 
-    // ✅ THIS is the bug: don't rely on acceptedTerms state
-    if (!termsChecked) return { ok: false as const, error: "Please agree to the Terms & Privacy Policy.", n, e, p };
+    // ✅ don't rely on acceptedTerms state
+    if (!termsChecked)
+      return {
+        ok: false as const,
+        error: "Please agree to the Terms & Privacy Policy.",
+        n,
+        e,
+        p,
+      };
 
     return { ok: true as const, n, e, p };
   };
@@ -300,7 +338,6 @@ const JazzyWidget: React.FC = () => {
     const emailVal = emailInputRef.current?.value ?? leadEmail;
     const phoneVal = phoneInputRef.current?.value ?? leadPhone;
 
-    // ✅ Read the REAL checkbox checked state
     const termsChecked = termsRef.current?.checked ?? acceptedTerms;
 
     const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
@@ -378,7 +415,12 @@ const JazzyWidget: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          lead: { name: leadName, email: leadEmail, phone: leadPhone, topic: selectedTopic },
+          lead: {
+            name: leadName,
+            email: leadEmail,
+            phone: leadPhone,
+            topic: selectedTopic,
+          },
           message: text,
           history: nextMessages.slice(-20).map(({ role, content }) => ({ role, content })),
           pageUrl: typeof window !== "undefined" ? window.location.href : "",
@@ -391,14 +433,17 @@ const JazzyWidget: React.FC = () => {
           {
             id: Date.now() + "-jazzy-error",
             role: "assistant",
-            content: "I’m having trouble connecting right now. A human from Digitalboxes will follow up shortly.",
+            content:
+              "I’m having trouble connecting right now. A human from Digitalboxes will follow up shortly.",
           },
         ]);
         return;
       }
 
       const data = await res.json().catch(() => null);
-      const reply: string = data?.reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+      const reply: string =
+        data?.reply ||
+        "Thanks! A member of the Digitalboxes team will follow up with you soon.";
       setMessages((prev) => [...prev, { id: Date.now() + "-jazzy", role: "assistant", content: reply }]);
 
       if (!askedForReview && shouldAskForReview(text)) {
@@ -407,7 +452,11 @@ const JazzyWidget: React.FC = () => {
         setTimeout(() => {
           setMessages((prev) => [
             ...prev,
-            { id: Date.now() + "-review-ask", role: "assistant", content: "Before you go — can you leave a quick rating? It helps a lot 🙏" },
+            {
+              id: Date.now() + "-review-ask",
+              role: "assistant",
+              content: "Before you go — can you leave a quick rating? It helps a lot 🙏",
+            },
           ]);
         }, 350);
 
@@ -421,7 +470,11 @@ const JazzyWidget: React.FC = () => {
       console.error("[Jazzy] sendMessage error:", err);
       setMessages((prev) => [
         ...prev,
-        { id: Date.now() + "-jazzy-fail", role: "assistant", content: "Connection dropped. Please try again." },
+        {
+          id: Date.now() + "-jazzy-fail",
+          role: "assistant",
+          content: "Connection dropped. Please try again.",
+        },
       ]);
     } finally {
       setLoading(false);
@@ -449,7 +502,9 @@ const JazzyWidget: React.FC = () => {
     CLOSE WIDGET
   ---------------------------------------------------------------------- */
   const closeWidget = () => {
-    setOpen(false);
+    // In embed mode, keep "open" true (page should remain visible)
+    if (!EMBED) setOpen(false);
+
     setShowSurvey(false);
     setLoading(false);
     setInput("");
@@ -466,152 +521,178 @@ const JazzyWidget: React.FC = () => {
     setReviewText("");
   };
 
+  // Layout helpers
+  const leadWrapClass = EMBED
+    ? "fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-white"
+    : "fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-[99999]";
+
+  const chatWrapClass = EMBED
+    ? "fixed inset-0 w-screen h-screen bg-white flex flex-col z-[99999]"
+    : "fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-[99999]";
+
+  const surveyWrapClass = EMBED
+    ? "fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-white"
+    : "fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-[99999]";
+
+  const cardClass = EMBED ? "w-full max-w-md" : "";
+
   return (
     <>
       {/* FLOATING BUTTON (hide in embed mode) */}
-{!isEmbeddedMode() && (
-  <div
-    className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
-    onClick={() => setOpen(true)}
-    role="button"
-    aria-label="Open Jazzy chat"
-  >
-    <div className="jazzyBtn">
-      <div className="jazzyAvatarFloat">
-        <img
-          src={AVATAR_SRC}
-          className="jazzyAvatarImg"
-          alt="Jazzy avatar"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
-          }}
-        />
-      </div>
+      {!EMBED && (
+        <div
+          className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
+          onClick={() => setOpen(true)}
+          role="button"
+          aria-label="Open Jazzy chat"
+        >
+          <div className="jazzyBtn">
+            <div className="jazzyAvatarFloat">
+              <img
+                src={AVATAR_SRC}
+                className="jazzyAvatarImg"
+                alt="Jazzy avatar"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).src = "/favicon.ico";
+                }}
+              />
+            </div>
 
-      <span className="jazzyBtnText">Chat with Jazzy</span>
-    </div>
-  </div>
-)}
+            <span className="jazzyBtnText">Chat with Jazzy</span>
+          </div>
+        </div>
+      )}
 
       {/* LEAD FORM */}
       {open && leadGate && (
-        <div className="fixed bottom-24 right-5 w-80 bg-white shadow-xl border rounded-xl p-4 z-[99999]">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-lg">Let’s get you to the right place 👋</h3>
-            <button onClick={closeWidget} className="text-xs text-gray-500 hover:text-gray-800" type="button">
-              Close
-            </button>
-          </div>
+        <div className={leadWrapClass}>
+          <div className={`${cardClass} ${EMBED ? "border rounded-xl shadow-xl p-4" : ""}`}>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-lg">Let’s get you to the right place 👋</h3>
 
-          <input
-            ref={nameInputRef}
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Name"
-            value={leadName}
-            onChange={(e) => {
-              setLeadName(e.target.value);
-              if (leadError) setLeadError("");
-            }}
-          />
+              {!EMBED && (
+                <button
+                  onClick={closeWidget}
+                  className="text-xs text-gray-500 hover:text-gray-800"
+                  type="button"
+                >
+                  Close
+                </button>
+              )}
+            </div>
 
-          <input
-            ref={emailInputRef}
-            type="email"
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="you@company.com"
-            value={leadEmail}
-            onChange={(e) => {
-              setLeadEmail(e.target.value);
-              if (leadError) setLeadError("");
-            }}
-          />
-
-          <input
-            ref={phoneInputRef}
-            className="border w-full p-2 rounded mb-2 text-sm"
-            placeholder="Phone (e.g. +923... or 033...)"
-            value={leadPhone}
-            onChange={(e) => {
-              setLeadPhone(e.target.value);
-              if (leadError) setLeadError("");
-            }}
-          />
-
-          <div className="flex gap-2 mb-2 text-xs flex-wrap">
-            {["Marketing & Services", "Free AI / SEO Tools", "Something Else"].map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setSelectedTopic(t)}
-                className={`px-2 py-1 rounded border active:scale-95 transition-transform duration-150 ${
-                  selectedTopic === t ? "bg-blue-600 text-white" : "bg-white text-gray-800"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-
-          <label className="text-xs flex items-center gap-2 mb-2">
             <input
-              ref={termsRef}
-              type="checkbox"
-              checked={acceptedTerms}
+              ref={nameInputRef}
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="Name"
+              value={leadName}
               onChange={(e) => {
-                setAcceptedTerms(e.target.checked);
+                setLeadName(e.target.value);
                 if (leadError) setLeadError("");
               }}
             />
-            I accept the Terms &amp; Conditions and Privacy Policy.
-          </label>
 
-          <div className="text-[11px] text-gray-500 mb-2">Protected by Cloudflare Turnstile.</div>
-          <div id="cf-turnstile" />
+            <input
+              ref={emailInputRef}
+              type="email"
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="you@company.com"
+              value={leadEmail}
+              onChange={(e) => {
+                setLeadEmail(e.target.value);
+                if (leadError) setLeadError("");
+              }}
+            />
 
-          {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
+            <input
+              ref={phoneInputRef}
+              className="border w-full p-2 rounded mb-2 text-sm"
+              placeholder="Phone (e.g. +923... or 033...)"
+              value={leadPhone}
+              onChange={(e) => {
+                setLeadPhone(e.target.value);
+                if (leadError) setLeadError("");
+              }}
+            />
 
-          <button
-            type="button"
-            onClick={() => {
-              setLeadError("");
+            <div className="flex gap-2 mb-2 text-xs flex-wrap">
+              {["Marketing & Services", "Free AI / SEO Tools", "Something Else"].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setSelectedTopic(t)}
+                  className={`px-2 py-1 rounded border active:scale-95 transition-transform duration-150 ${
+                    selectedTopic === t ? "bg-blue-600 text-white" : "bg-white text-gray-800"
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
 
-              const nameVal = nameInputRef.current?.value ?? leadName;
-              const emailVal = emailInputRef.current?.value ?? leadEmail;
-              const phoneVal = phoneInputRef.current?.value ?? leadPhone;
-              const termsChecked = termsRef.current?.checked ?? acceptedTerms;
+            <label className="text-xs flex items-center gap-2 mb-2">
+              <input
+                ref={termsRef}
+                type="checkbox"
+                checked={acceptedTerms}
+                onChange={(e) => {
+                  setAcceptedTerms(e.target.checked);
+                  if (leadError) setLeadError("");
+                }}
+              />
+              I accept the Terms &amp; Conditions and Privacy Policy.
+            </label>
 
-              const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
-              if (!local.ok) {
-                setLeadError(local.error);
-                return;
-              }
+            <div className="text-[11px] text-gray-500 mb-2">
+              Protected by Cloudflare Turnstile.
+            </div>
+            <div id="cf-turnstile" />
 
-              setLeadName(local.n.value);
-              setLeadEmail(local.e.value);
-              setLeadPhone(local.p.value);
-              setAcceptedTerms(termsChecked);
+            {leadError && <div className="text-red-500 text-xs mb-2">{leadError}</div>}
 
-              if (!turnstileRenderedRef.current) {
-                renderTurnstile();
-                return;
-              }
+            <button
+              type="button"
+              onClick={() => {
+                setLeadError("");
 
-              if (window.turnstile && turnstileWidgetIdRef.current) {
-                window.turnstile.execute(turnstileWidgetIdRef.current);
-              } else {
-                setLeadError("Captcha not ready. Please try again.");
-              }
-            }}
-            className="w-full bg-blue-600 text-white py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150"
-          >
-            Continue to chat
-          </button>
+                const nameVal = nameInputRef.current?.value ?? leadName;
+                const emailVal = emailInputRef.current?.value ?? leadEmail;
+                const phoneVal = phoneInputRef.current?.value ?? leadPhone;
+                const termsChecked = termsRef.current?.checked ?? acceptedTerms;
+
+                const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
+                if (!local.ok) {
+                  setLeadError(local.error);
+                  return;
+                }
+
+                setLeadName(local.n.value);
+                setLeadEmail(local.e.value);
+                setLeadPhone(local.p.value);
+                setAcceptedTerms(termsChecked);
+
+                if (!turnstileRenderedRef.current) {
+                  renderTurnstile();
+                  return;
+                }
+
+                if (window.turnstile && turnstileWidgetIdRef.current) {
+                  window.turnstile.execute(turnstileWidgetIdRef.current);
+                } else {
+                  setLeadError("Captcha not ready. Please try again.");
+                }
+              }}
+              className="w-full bg-blue-600 text-white py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150"
+            >
+              Continue to chat
+            </button>
+          </div>
         </div>
       )}
 
       {/* CHAT WINDOW */}
       {open && !leadGate && (
-        <div className="fixed bottom-20 right-5 w-80 h-[450px] bg-white shadow-xl border rounded-xl flex flex-col z-[99999]">
+        <div className={chatWrapClass}>
           <div className="p-3 border-b bg-gray-100 flex items-center">
             <img
               src={AVATAR_SRC}
@@ -638,14 +719,25 @@ const JazzyWidget: React.FC = () => {
               End chat
             </button>
 
-            <button className="ml-2 text-xs text-gray-600 hover:text-gray-900 active:scale-95 transition-transform duration-150" onClick={closeWidget} type="button">
-              Close
-            </button>
+            {!EMBED && (
+              <button
+                className="ml-2 text-xs text-gray-600 hover:text-gray-900 active:scale-95 transition-transform duration-150"
+                onClick={closeWidget}
+                type="button"
+              >
+                Close
+              </button>
+            )}
           </div>
 
           <div className="flex-1 p-3 overflow-y-auto space-y-2" ref={chatRef}>
             {messages.map((m) => (
-              <div key={m.id} className={`flex items-end gap-2 ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                key={m.id}
+                className={`flex items-end gap-2 ${
+                  m.role === "user" ? "justify-end" : "justify-start"
+                }`}
+              >
                 {m.role === "assistant" && (
                   <img
                     src={AVATAR_SRC}
@@ -656,7 +748,13 @@ const JazzyWidget: React.FC = () => {
                     }}
                   />
                 )}
-                <div className={`px-3 py-2 rounded-xl max-w-[75%] whitespace-pre-line ${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-900"}`}>
+                <div
+                  className={`px-3 py-2 rounded-xl max-w-[75%] whitespace-pre-line ${
+                    m.role === "user"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-200 text-gray-900"
+                  }`}
+                >
                   {m.content}
                 </div>
               </div>
@@ -666,7 +764,9 @@ const JazzyWidget: React.FC = () => {
           <div className="p-2 border-t flex items-center gap-2">
             <button
               onClick={toggleMic}
-              className={`h-8 w-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform duration-150 ${listening ? "bg-red-100 border-red-400" : ""}`}
+              className={`h-8 w-8 rounded-full border flex items-center justify-center active:scale-95 transition-transform duration-150 ${
+                listening ? "bg-red-100 border-red-400" : ""
+              }`}
               type="button"
               aria-label="Toggle microphone"
             >
@@ -695,80 +795,97 @@ const JazzyWidget: React.FC = () => {
 
       {/* SURVEY MODAL */}
       {showSurvey && (
-        <div className="fixed bottom-32 right-5 bg-white border shadow-xl p-4 rounded-xl w-80 z-[99999]">
-          <h3 className="font-semibold mb-2">Rate your experience</h3>
+        <div className={surveyWrapClass}>
+          <div className={`${cardClass} ${EMBED ? "border rounded-xl shadow-xl p-4" : ""}`}>
+            <h3 className="font-semibold mb-2">Rate your experience</h3>
 
-          <div className="flex gap-2 mb-3 text-2xl">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <button
-                key={star}
-                type="button"
-                onClick={() => setRating(star)}
-                className={`${star <= rating ? "text-yellow-500" : "text-gray-300"} active:scale-95 transition-transform duration-150`}
-                aria-label={`Rate ${star} stars`}
-              >
-                ★
-              </button>
-            ))}
+            <div className="flex gap-2 mb-3 text-2xl">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRating(star)}
+                  className={`${
+                    star <= rating ? "text-yellow-500" : "text-gray-300"
+                  } active:scale-95 transition-transform duration-150`}
+                  aria-label={`Rate ${star} stars`}
+                >
+                  ★
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              className="border w-full p-2 rounded text-sm mb-2"
+              placeholder="Any feedback?"
+              value={reviewText}
+              onChange={(e) => setReviewText(e.target.value)}
+            />
+
+            <button
+              onClick={submitSurvey}
+              className="bg-blue-600 text-white w-full py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150"
+              type="button"
+              disabled={rating === 0}
+            >
+              Submit Feedback
+            </button>
+
+            <button
+              onClick={() => setShowSurvey(false)}
+              className="mt-2 w-full text-xs text-gray-600 hover:text-gray-900"
+              type="button"
+            >
+              Not now
+            </button>
           </div>
-
-          <textarea className="border w-full p-2 rounded text-sm mb-2" placeholder="Any feedback?" value={reviewText} onChange={(e) => setReviewText(e.target.value)} />
-
-          <button onClick={submitSurvey} className="bg-blue-600 text-white w-full py-2 rounded text-sm active:scale-[0.98] transition-transform duration-150" type="button" disabled={rating === 0}>
-            Submit Feedback
-          </button>
-
-          <button onClick={() => setShowSurvey(false)} className="mt-2 w-full text-xs text-gray-600 hover:text-gray-900" type="button">
-            Not now
-          </button>
         </div>
       )}
 
       <style jsx>{`
-  .jazzyBtn {
-    position: relative;
-    display: flex;
-    align-items: center;
-    background: #ffffff;
-    border: 1px solid rgba(0, 0, 0, 0.12);
-    border-radius: 9999px;
-    padding: 10px 16px 10px 60px;
-    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
-    transition: transform 150ms ease;
-  }
+        .jazzyBtn {
+          position: relative;
+          display: flex;
+          align-items: center;
+          background: #ffffff;
+          border: 1px solid rgba(0, 0, 0, 0.12);
+          border-radius: 9999px;
+          padding: 10px 16px 10px 60px;
+          box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+          transition: transform 150ms ease;
+        }
 
-  .jazzyBtn:active {
-    transform: scale(0.97);
-  }
+        .jazzyBtn:active {
+          transform: scale(0.97);
+        }
 
-  .jazzyAvatarFloat {
-    position: absolute;
-    left: -16px;
-    bottom: -10px;
-    width: 58px;
-    height: 58px;
-    border-radius: 9999px;
-    overflow: hidden;
-    background: #0d5bd8;
-    border: 3px solid #ffffff;
-    box-shadow: 0 12px 22px rgba(0, 0, 0, 0.25);
-  }
+        .jazzyAvatarFloat {
+          position: absolute;
+          left: -16px;
+          bottom: -10px;
+          width: 58px;
+          height: 58px;
+          border-radius: 9999px;
+          overflow: hidden;
+          background: #0d5bd8;
+          border: 3px solid #ffffff;
+          box-shadow: 0 12px 22px rgba(0, 0, 0, 0.25);
+        }
 
-  .jazzyAvatarImg {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
+        .jazzyAvatarImg {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          display: block;
+        }
 
-  .jazzyBtnText {
-    font-size: 14px;
-    font-weight: 700;
-    color: #111827;
-    white-space: nowrap;
-  }
-`}</style>
-
+        .jazzyBtnText {
+          font-size: 14px;
+          font-weight: 700;
+          color: #111827;
+          white-space: nowrap;
+        }
+      `}</style>
     </>
   );
 };

@@ -6,8 +6,6 @@ import { useRouter } from "next/router";
 
 export default function MyApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
-
-  // Don't render launcher on iframe chat page
   const isJazzyChatPage = router.pathname === "/jazzy-chat";
 
   return (
