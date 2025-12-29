@@ -460,7 +460,19 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
         { id: Date.now() + "-jazzy", role: "assistant", content: reply },
       ]);
 
-      if (!askedForReview && shouldAskForReview(text)) {
+      /**
+       * ✅ FIX:
+       * Do NOT auto-open the survey just because the user typed "ok/thanks".
+       * Only ask for review after real conversation happens.
+       *
+       * Rule:
+       * - require at least 6 total messages in the thread
+       * - AND user message must contain a real exit intent (bye/exit/end/close)
+       */
+      const msgCount = nextMessages.length; // includes the new user message
+      const exitIntent = /\b(bye|goodbye|exit|end chat|close chat|close|stop|done for now)\b/i.test(text);
+
+      if (!askedForReview && msgCount >= 6 && exitIntent && shouldAskForReview(text)) {
         setAskedForReview(true);
 
         setTimeout(() => {
