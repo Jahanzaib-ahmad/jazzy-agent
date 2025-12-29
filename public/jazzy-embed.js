@@ -1,3 +1,7 @@
+// DEPRECATED: do not use this file
+console.warn("jazzy-embed.js is deprecated. Use widget.js instead.");
+return;
+
 (function () {
   // Prevent double-load
   if (window.__JAZZY_EMBED_LOADED__) return;

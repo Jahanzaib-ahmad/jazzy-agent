@@ -29,6 +29,16 @@ type Payload = {
   pageUrl?: string;
 };
 
+type ApiResponse =
+  | {
+      success: true;
+      reply: string;
+      suggestedReplies?: string[];
+      escalate?: boolean;
+      reason?: string;
+    }
+  | { success: false; error: string };
+
 /* -------------------- helpers -------------------- */
 
 function cleanStr(v: any, max = 5000) {
@@ -49,6 +59,58 @@ function escapeHtml(input: string) {
 
 function isValidEmail(email: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/** Detect when user likely needs a human */
+function needsHumanHandoff(text: string) {
+  const t = (text || "").toLowerCase();
+  const triggers = [
+    "urgent",
+    "asap",
+    "not working",
+    "broken",
+    "error",
+    "refund",
+    "complaint",
+    "call",
+    "meeting",
+    "quote",
+    "pricing",
+    "price",
+    "budget",
+    "invoice",
+    "payment",
+    "whatsapp",
+  ];
+  return triggers.some((k) => t.includes(k));
+}
+
+/** Topic routing + suggested replies */
+function topicPlaybook(topic?: string) {
+  const t = (topic || "").toLowerCase();
+
+  if (t.includes("marketing")) {
+    return {
+      label: "Marketing & Services",
+      suggested: ["I need more leads", "I want SEO help", "I need a website quote"],
+      criticalQuestion:
+        "What’s your #1 goal right now — leads, sales, traffic, or brand?",
+    };
+  }
+
+  if (t.includes("free ai") || t.includes("seo tools")) {
+    return {
+      label: "Free AI / SEO Tools",
+      suggested: ["Check my SEO", "Site speed issue", "Meta/keywords help"],
+      criticalQuestion: "What’s your website URL?",
+    };
+  }
+
+  return {
+    label: "General",
+    suggested: ["Get a quote", "Report a website issue", "Ask an SEO question"],
+    criticalQuestion: "What are you trying to achieve today?",
+  };
 }
 
 function extractReplyText(response: any): string | null {
@@ -157,58 +219,90 @@ async function sendLeadEmail(data: {
 
 /* ------------------- OpenAI – generate reply ---------------------- */
 
-async function generateJazzyReply(args: Payload): Promise<string> {
+async function generateJazzyReply(args: Payload): Promise<{ reply: string; suggestedReplies: string[]; escalate: boolean; reason?: string }> {
+  const lead = args.lead || { name: "Unknown", email: "", topic: "Something Else" };
+  const history = Array.isArray(args.history) ? args.history.slice(-20) : [];
+  const play = topicPlaybook(lead.topic);
+
+  const escalate = needsHumanHandoff(args.message);
+
+  // fallback suggested replies
+  const suggestedReplies = escalate
+    ? ["Human on WhatsApp", "Email support", "Send a quote request"]
+    : play.suggested;
+
   if (!OPENAI_API_KEY) {
-    return (
-      "Thanks for your message! Our AI assistant is temporarily offline, " +
-      "but a human from Digitalboxes will follow up with you shortly."
-    );
+    return {
+      reply:
+        "Thanks — our AI assistant is temporarily offline.\n- A human from Digitalboxes will follow up shortly\n" +
+        "What’s the best way to reach you — WhatsApp or email?",
+      suggestedReplies: ["Human on WhatsApp", "Email support"],
+      escalate: true,
+      reason: "missing_openai_key",
+    };
   }
 
-  // ✅ IMPORTANT: no greeting in prompt (UI handles first greeting)
+  // 🔥 Upgraded system prompt for quality
   const systemPrompt = `
-You are Jazzy, the AI assistant for Digitalboxes (digital marketing & development agency).
+You are Jazzy, the AI assistant for Digitalboxes (digital marketing & development).
 
-Hard rules:
-- Do NOT greet the user (no hi/hello/salaam/assalam). The UI already greets.
-- Do NOT repeat introductions.
-- Do NOT ask for details the user already provided earlier in the chat.
-- If the user says "I already shared this", acknowledge and summarize what they provided.
-- Ask at most ONE follow-up question only if something critical is missing.
-- Keep replies short, natural, and non-robotic. No markdown.
+HARD RULES:
+- Do NOT greet (no hi/hello/salaam). UI already greets.
+- No long paragraphs. Use this structure:
+  1) One-line direct answer
+  2) 2–5 bullets (steps/options)
+  3) End with ONLY ONE question
+- Don’t ask for info the user already provided in chat history.
+- If user is frustrated, acknowledge in one short line + give steps.
+- If unsure, ask for ONE missing item (URL/plugin/screenshot).
+- If user asks pricing/quote/meeting/urgent/broken: keep it tight and offer human handoff.
+
+STYLE:
+- Natural and human. No markdown. No robotic tone.
+- Practical and actionable.
+
+CONTEXT (use it):
+- Lead name: ${lead.name}
+- Email: ${lead.email}
+- Phone: ${lead.phone || "Not provided"}
+- Topic: ${lead.topic}
+- Page URL: ${args.pageUrl || "Not provided"}
+- Topic playbook: ${play.label}
 `.trim();
 
-  const lead = args.lead || { name: "Unknown", email: "", topic: "Something Else" };
-
-  const history = Array.isArray(args.history) ? args.history.slice(-20) : [];
-
   const userPrompt = `
-Lead details:
-- Name: ${lead.name || "Unknown"}
-- Email: ${lead.email || "Not provided"}
-- Phone: ${lead.phone || "Not provided"}
-- Topic: ${lead.topic || "Not specified"}
-
 User message:
 ${args.message || "(no message)"}
+
+If the user didn’t provide enough context, ask ONE question.
+If topic is "${play.label}" and the user is vague, default to this question:
+"${play.criticalQuestion}"
 `.trim();
 
   const response = await openai.responses.create({
     model: "gpt-4.1-mini",
     input: [
       { role: "system", content: systemPrompt },
-      ...history.map((m) => ({ role: m.role as any, content: m.content })),
+      ...history.map((m) => ({ role: m.role as any, content: cleanStr(m.content, 3000) })),
       { role: "user", content: userPrompt },
     ],
   });
 
-  const reply = extractReplyText(response);
-  return reply || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+  let reply = extractReplyText(response) || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+
+  // If escalation triggered, ensure we offer handoff in reply (without repeating greeting)
+  if (escalate && !reply.toLowerCase().includes("whatsapp") && !reply.toLowerCase().includes("email")) {
+    reply =
+      reply +
+      "\n\nIf you want, I can hand this to a human right now.\n- WhatsApp or Email?\nWhich one do you prefer?";
+  }
+
+  return { reply, suggestedReplies, escalate, reason: escalate ? "handoff_trigger" : undefined };
 }
 
 /* -------------------------- Main handler -------------------------- */
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse<ApiResponse>) {
   res.setHeader("Cache-Control", "no-store");
 
   if (req.method !== "POST") {
@@ -217,7 +311,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    // ✅ Accept both old and new payload shapes
     const body = req.body || {};
 
     const leadObj = body.lead || {
@@ -239,11 +332,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // Validation
     if (!lead.name || lead.name.trim().length < 2) {
-  return res.status(400).json({
-    success: false,
-    error: "Invalid name",
-  });
-}
+      return res.status(400).json({ success: false, error: "Invalid name" });
+    }
     if (!isValidEmail(lead.email)) {
       return res.status(400).json({ success: false, error: "Invalid email" });
     }
@@ -270,14 +360,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       pageUrl,
     });
 
-    const reply = await generateJazzyReply({
+    const out = await generateJazzyReply({
       lead,
       message,
       history: Array.isArray(body.history) ? body.history : [],
       pageUrl,
     });
 
-    return res.status(200).json({ success: true, reply });
+    return res.status(200).json({
+      success: true,
+      reply: out.reply,
+      suggestedReplies: out.suggestedReplies,
+      escalate: out.escalate,
+      reason: out.reason,
+    });
   } catch (err: any) {
     console.error("[Jazzy] API error:", err);
     return res.status(500).json({ success: false, error: err?.message || "Server error" });
