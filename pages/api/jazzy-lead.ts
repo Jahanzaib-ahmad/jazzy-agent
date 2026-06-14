@@ -138,8 +138,7 @@ function extractReplyText(response: any): string | null {
 
 /* ----------------- Google Sheet webhook (optional) -----------------
    Sends a FLAT JSON payload with lowercase keys that match the
-   Apps Script doPost (body.name, body.email, body.topic, etc.).
-   This fixes the empty-fields bug (#4).
+   Apps Script doPost (body.name, body.email, body.phone, body.topic, etc.).
 ------------------------------------------------------------------- */
 
 async function sendLeadToSheet(data: {
@@ -231,9 +230,8 @@ async function generateJazzyReply(args: Payload): Promise<{
 
   const escalate = needsHumanHandoff(args.message);
 
-  // How many turns the USER has actually taken in this thread
   const userTurns = history.filter((m) => m.role === "user").length;
-  const isOpening = userTurns <= 1; // first real exchange
+  const isOpening = userTurns <= 1;
 
   const suggestedReplies = escalate
     ? ["Human on WhatsApp", "Email support", "Send a quote request"]
@@ -250,7 +248,6 @@ async function generateJazzyReply(args: Payload): Promise<{
     };
   }
 
-  // Consultant-style system prompt with a hard anti-repeat rule
   const systemPrompt = `
 You are Jazzy, the AI assistant and sales consultant for Digitalboxes (digital marketing, SEO, and web development).
 
@@ -259,7 +256,7 @@ ALREADY CAPTURED — NEVER ask for any of these again:
 - Email: ${lead.email}
 - Phone: ${lead.phone || "Not provided"}
 - Topic of interest: ${lead.topic}
-- Page they're on: ${args.pageUrl || "Not provided"}
+- Page where they opened this chat (this is OUR website, NOT the user's — never treat it as the user's site or offer to optimize it): ${args.pageUrl || "Not provided"}
 
 YOUR JOB (in this order):
 1. Understand the visitor's real goal fast.
@@ -279,13 +276,12 @@ STYLE:
 - Natural, human, confident — like a senior strategist, not a form.
 - Short. One-line direct answer, then up to 4 tight bullets if useful, then optionally ONE question OR one clear next step.
 - Plain text only. No markdown symbols, no headings.
-- Be specific. Reference their topic or URL whenever possible. Avoid generic filler.
+- Be specific. Reference their stated goal or topic whenever possible. Avoid generic filler. Do NOT mention or reference any URL unless the user themselves typed a website address.
 
 HANDOFF:
 - If they ask about pricing, a quote, or a meeting, or sound urgent or frustrated: keep it short and offer a human handoff via WhatsApp or email.
 `.trim();
 
-  // Only nudge the opener on the FIRST exchange — never re-inject later.
   const openingHint = isOpening
     ? `\n\nThis is the start of the conversation. If the user's goal isn't already clear from their message, a good opening question for the "${play.label}" topic is: "${play.openingQuestion}". Use it only if needed — do not ask it if they've already told you their goal.`
     : `\n\nThis conversation is already in progress. Do NOT restart with goal-discovery questions. Continue from what has been established and push toward a concrete next step.`;
@@ -298,7 +294,6 @@ HANDOFF:
         role: m.role as any,
         content: cleanStr(m.content, 3000),
       })),
-      // Pass the user's real message cleanly — no per-turn instruction wrapper.
       { role: "user", content: args.message || "(no message)" },
     ],
   });
@@ -367,8 +362,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
     const history = Array.isArray(body.history) ? body.history : [];
 
-    // Only push a lead to the sheet/email on the FIRST user message,
-    // so you don't create a new lead row (and email) on every single turn.
     const isFirstUserMessage =
       history.filter((m: any) => m?.role === "user").length <= 1;
 
