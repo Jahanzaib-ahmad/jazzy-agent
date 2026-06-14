@@ -19,13 +19,9 @@ const TURNSTILE_SCRIPT_SRC =
 function isEmbeddedMode() {
   if (typeof window === "undefined") return false;
 
-  // widget.js can set this flag when embedding (optional)
   if ((window as any).__JAZZY_EMBED__ === true) return true;
-
-  // fallback: if container exists (widget mounted into a div)
   if (document.getElementById("jazzy-widget-root")) return true;
 
-  // fallback: iframe detection
   try {
     if (window.self !== window.top) return true;
   } catch {
@@ -35,12 +31,10 @@ function isEmbeddedMode() {
   return false;
 }
 
-/** Normalize multiple spaces */
 function normalizeSpaces(raw: string) {
   return (raw || "").replace(/\s+/g, " ").trim();
 }
 
-/** ✅ NAME VALIDATION: required only */
 function validateName(raw: string) {
   const name = normalizeSpaces(raw);
   if (!name) return { ok: false, value: name, error: "Please enter your name" };
@@ -49,20 +43,12 @@ function validateName(raw: string) {
   return { ok: true, value: name, error: "" };
 }
 
-/** Basic email validation */
 function validateEmail(raw: string) {
   const email = (raw ?? "").trim();
   const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   return { ok, value: email, error: ok ? "" : "Enter a valid email" };
 }
 
-/**
- * ✅ Phone validation (relaxed):
- * Accepts:
- *  - +923111090222
- *  - 033112447003
- *  - 33112447003
- */
 function validatePhone(raw: string) {
   const input = (raw ?? "").trim();
   if (!input)
@@ -104,21 +90,6 @@ function firstNameFrom(full: string) {
   return s.split(/\s+/)[0];
 }
 
-/** Decide when to ask for review */
-function shouldAskForReview(text: string) {
-  const t = (text || "").toLowerCase();
-  return (
-    t.includes("thank") ||
-    t.includes("thanks") ||
-    t.includes("ok") ||
-    t.includes("okay") ||
-    t.includes("done") ||
-    t.includes("bye") ||
-    t.includes("perfect") ||
-    t.includes("great")
-  );
-}
-
 const AVATAR_SRC = "/jazzy-avatar.png";
 
 type Props = { embed?: boolean };
@@ -154,17 +125,14 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
   const chatRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<any>(null);
 
-  // ✅ Refs to always read REAL values (fixes timing bugs)
   const nameInputRef = useRef<HTMLInputElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const phoneInputRef = useRef<HTMLInputElement | null>(null);
   const termsRef = useRef<HTMLInputElement | null>(null);
 
-  // Turnstile
   const turnstileWidgetIdRef = useRef<string | null>(null);
   const turnstileRenderedRef = useRef(false);
 
-  // ✅ Tell parent (widget.js) to close iframe
   const notifyParentClose = () => {
     try {
       if (typeof window !== "undefined" && window.parent && window.parent !== window) {
@@ -173,9 +141,7 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     } catch {}
   };
 
-  /* ----------------------------------------------------------------------
-    SPEECH RECOGNITION
-  ---------------------------------------------------------------------- */
+  /* ------------------ SPEECH RECOGNITION ------------------ */
   useEffect(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -195,16 +161,12 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     recognitionRef.current = recognition;
   }, []);
 
-  /* ----------------------------------------------------------------------
-    AUTO SCROLL CHAT
-  ---------------------------------------------------------------------- */
+  /* ------------------ AUTO SCROLL CHAT ------------------ */
   useEffect(() => {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [messages]);
 
-  /* ----------------------------------------------------------------------
-    LOAD TURNSTILE SCRIPT (ONCE)
-  ---------------------------------------------------------------------- */
+  /* ------------------ LOAD TURNSTILE SCRIPT ------------------ */
   const ensureTurnstileScript = () =>
     new Promise<void>((resolve, reject) => {
       if (typeof window === "undefined") return resolve();
@@ -238,9 +200,7 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
       document.head.appendChild(script);
     });
 
-  /* ----------------------------------------------------------------------
-    RENDER TURNSTILE WIDGET
-  ---------------------------------------------------------------------- */
+  /* ------------------ RENDER TURNSTILE ------------------ */
   const renderTurnstile = async () => {
     const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
@@ -301,9 +261,7 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, leadGate]);
 
-  /* ----------------------------------------------------------------------
-    LOCAL LEAD VALIDATION (uses REF values + termsRef)
-  ---------------------------------------------------------------------- */
+  /* ------------------ LOCAL LEAD VALIDATION ------------------ */
   const validateLeadLocal = (
     nameRaw: string,
     emailRaw: string,
@@ -340,16 +298,13 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     return { ok: true as const, n, e, p };
   };
 
-  /* ----------------------------------------------------------------------
-    TURNSTILE SERVER CHECK THEN OPEN CHAT
-  ---------------------------------------------------------------------- */
+  /* ------------------ TURNSTILE CHECK THEN OPEN CHAT ------------------ */
   const validateLead = async (token: string) => {
     setLeadError("");
 
     const nameVal = nameInputRef.current?.value ?? leadName;
     const emailVal = emailInputRef.current?.value ?? leadEmail;
     const phoneVal = phoneInputRef.current?.value ?? leadPhone;
-
     const termsChecked = termsRef.current?.checked ?? acceptedTerms;
 
     const local = validateLeadLocal(nameVal, emailVal, phoneVal, termsChecked);
@@ -407,9 +362,7 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     }
   };
 
-  /* ----------------------------------------------------------------------
-    SEND MESSAGE TO API (WITH HISTORY)
-  ---------------------------------------------------------------------- */
+  /* ------------------ SEND MESSAGE ------------------ */
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || loading) return;
@@ -460,19 +413,10 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
         { id: Date.now() + "-jazzy", role: "assistant", content: reply },
       ]);
 
-      /**
-       * ✅ FIX:
-       * Do NOT auto-open the survey just because the user typed "ok/thanks".
-       * Only ask for review after real conversation happens.
-       *
-       * Rule:
-       * - require at least 6 total messages in the thread
-       * - AND user message must contain a real exit intent (bye/exit/end/close)
-       */
-      const msgCount = nextMessages.length; // includes the new user message
+      const msgCount = nextMessages.length;
       const exitIntent = /\b(bye|goodbye|exit|end chat|close chat|close|stop|done for now)\b/i.test(text);
 
-      if (!askedForReview && msgCount >= 6 && exitIntent && shouldAskForReview(text)) {
+      if (!askedForReview && msgCount >= 6 && exitIntent) {
         setAskedForReview(true);
 
         setTimeout(() => {
@@ -507,27 +451,15 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     }
   };
 
-  /* ----------------------------------------------------------------------
-    MIC
-  ---------------------------------------------------------------------- */
-  const toggleMic = () => {
-    if (!recognitionRef.current) return;
-    if (listening) recognitionRef.current.stop();
-    else recognitionRef.current.start();
-    setListening(!listening);
-  };
-
-  /* ----------------------------------------------------------------------
-    CLOSE WIDGET (fixed for embed)
-  ---------------------------------------------------------------------- */
+  /* ------------------ CLOSE WIDGET (full reset) ------------------ */
   const closeWidget = () => {
     if (EMBED) {
-      notifyParentClose(); // ✅ close iframe on parent
+      notifyParentClose();
     } else {
-      setOpen(false); // ✅ hide widget on normal site
+      setOpen(false);
     }
 
-    // Reset everything
+    // Reset chat/session state
     setShowSurvey(false);
     setLoading(false);
     setInput("");
@@ -542,14 +474,18 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
     setMessages([]);
     setRating(0);
     setReviewText("");
+
+    // ✅ FIX #3: clear the lead identity so the next session starts blank
+    setLeadName("");
+    setLeadEmail("");
+    setLeadPhone("");
+    setAcceptedTerms(false);
+    setSelectedTopic("Something Else");
   };
 
-  /* ----------------------------------------------------------------------
-    SURVEY SUBMIT (fixed) -> close chat
-  ---------------------------------------------------------------------- */
+  /* ------------------ SURVEY SUBMIT ------------------ */
   const submitSurvey = () => {
-    // If later you want to POST rating/review, do it here before closing
-    closeWidget(); // ✅ this closes chat + iframe
+    closeWidget();
   };
 
   // Layout helpers
@@ -569,7 +505,7 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
 
   return (
     <>
-      {/* FLOATING BUTTON (hide in embed mode) */}
+      {/* FLOATING BUTTON (hidden in embed; widget.js handles launcher) */}
       {!EMBED && (
         <div
           className="fixed bottom-5 right-5 z-[99999] cursor-pointer select-none"
@@ -887,7 +823,13 @@ const JazzyWidget: React.FC<Props> = ({ embed = false }) => {
           border-radius: 9999px;
           padding: 10px 16px 10px 60px;
           box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
-          transition: transform 150ms ease;
+          cursor: pointer;
+          transition: transform 200ms ease, box-shadow 200ms ease;
+        }
+
+        .jazzyBtn:hover {
+          transform: translateY(-4px) scale(1.04);
+          box-shadow: 0 18px 32px rgba(0, 0, 0, 0.28);
         }
 
         .jazzyBtn:active {

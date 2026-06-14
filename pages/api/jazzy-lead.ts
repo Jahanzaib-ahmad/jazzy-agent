@@ -93,7 +93,7 @@ function topicPlaybook(topic?: string) {
     return {
       label: "Marketing & Services",
       suggested: ["I need more leads", "I want SEO help", "I need a website quote"],
-      criticalQuestion:
+      openingQuestion:
         "What’s your #1 goal right now — leads, sales, traffic, or brand?",
     };
   }
@@ -102,14 +102,14 @@ function topicPlaybook(topic?: string) {
     return {
       label: "Free AI / SEO Tools",
       suggested: ["Check my SEO", "Site speed issue", "Meta/keywords help"],
-      criticalQuestion: "What’s your website URL?",
+      openingQuestion: "What’s your website URL so I can take a look?",
     };
   }
 
   return {
     label: "General",
     suggested: ["Get a quote", "Report a website issue", "Ask an SEO question"],
-    criticalQuestion: "What are you trying to achieve today?",
+    openingQuestion: "What are you trying to achieve today?",
   };
 }
 
@@ -136,7 +136,11 @@ function extractReplyText(response: any): string | null {
   return null;
 }
 
-/* ----------------- Google Sheet webhook (optional) ----------------- */
+/* ----------------- Google Sheet webhook (optional) -----------------
+   Sends a FLAT JSON payload with lowercase keys that match the
+   Apps Script doPost (body.name, body.email, body.topic, etc.).
+   This fixes the empty-fields bug (#4).
+------------------------------------------------------------------- */
 
 async function sendLeadToSheet(data: {
   name: string;
@@ -153,16 +157,12 @@ async function sendLeadToSheet(data: {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: JSON.stringify({
-          timestamp: new Date().toISOString(),
-          Name: data.name,
-          Email: data.email,
-          Phone: data.phone || "",
-          Topic: data.topic,
-          "First Message": data.firstMessage,
-          PageURL: data.pageUrl || "",
-          Status: "Open",
-        }),
+        name: data.name,
+        email: data.email,
+        phone: data.phone || "",
+        topic: data.topic,
+        firstMessage: data.firstMessage,
+        pageUrl: data.pageUrl || "",
       }),
     });
   } catch (err) {
@@ -219,14 +219,22 @@ async function sendLeadEmail(data: {
 
 /* ------------------- OpenAI – generate reply ---------------------- */
 
-async function generateJazzyReply(args: Payload): Promise<{ reply: string; suggestedReplies: string[]; escalate: boolean; reason?: string }> {
+async function generateJazzyReply(args: Payload): Promise<{
+  reply: string;
+  suggestedReplies: string[];
+  escalate: boolean;
+  reason?: string;
+}> {
   const lead = args.lead || { name: "Unknown", email: "", topic: "Something Else" };
   const history = Array.isArray(args.history) ? args.history.slice(-20) : [];
   const play = topicPlaybook(lead.topic);
 
   const escalate = needsHumanHandoff(args.message);
 
-  // fallback suggested replies
+  // How many turns the USER has actually taken in this thread
+  const userTurns = history.filter((m) => m.role === "user").length;
+  const isOpening = userTurns <= 1; // first real exchange
+
   const suggestedReplies = escalate
     ? ["Human on WhatsApp", "Email support", "Send a quote request"]
     : play.suggested;
@@ -242,62 +250,79 @@ async function generateJazzyReply(args: Payload): Promise<{ reply: string; sugge
     };
   }
 
-  // 🔥 Upgraded system prompt for quality
+  // Consultant-style system prompt with a hard anti-repeat rule
   const systemPrompt = `
-You are Jazzy, the AI assistant for Digitalboxes (digital marketing & development).
+You are Jazzy, the AI assistant and sales consultant for Digitalboxes (digital marketing, SEO, and web development).
 
-HARD RULES:
-- Do NOT greet (no hi/hello/salaam). UI already greets.
-- No long paragraphs. Use this structure:
-  1) One-line direct answer
-  2) 2–5 bullets (steps/options)
-  3) End with ONLY ONE question
-- Don’t ask for info the user already provided in chat history.
-- If user is frustrated, acknowledge in one short line + give steps.
-- If unsure, ask for ONE missing item (URL/plugin/screenshot).
-- If user asks pricing/quote/meeting/urgent/broken: keep it tight and offer human handoff.
-
-STYLE:
-- Natural and human. No markdown. No robotic tone.
-- Practical and actionable.
-
-CONTEXT (use it):
-- Lead name: ${lead.name}
+ALREADY CAPTURED — NEVER ask for any of these again:
+- Name: ${lead.name}
 - Email: ${lead.email}
 - Phone: ${lead.phone || "Not provided"}
-- Topic: ${lead.topic}
-- Page URL: ${args.pageUrl || "Not provided"}
-- Topic playbook: ${play.label}
+- Topic of interest: ${lead.topic}
+- Page they're on: ${args.pageUrl || "Not provided"}
+
+YOUR JOB (in this order):
+1. Understand the visitor's real goal fast.
+2. Give a genuinely useful, specific insight or mini-plan that shows real expertise and builds trust.
+3. Move them toward ONE concrete next step: a free audit, a quote, or a quick call with the human team.
+You are here to win business — not to run an interview.
+
+CONVERSATION RULES (critical — follow exactly):
+- NEVER repeat a question that already appears earlier in this conversation. Read the full history first. If goal, visibility, URL, or scope was already discussed, BUILD on it — never reset to an earlier question.
+- Advance the conversation every single turn. Each reply must add NEW value, not re-confirm what is already known.
+- Ask at most ONE question, and only when you truly need it to help. The moment you have enough to give advice, give the advice instead of asking another question.
+- Once the user has shared their goal plus some context, STOP qualifying and propose a concrete next step (free audit, quote, or call).
+- It is fine to end a reply with a clear call-to-action instead of a question.
+- Do not greet. The UI already greeted the user.
+
+STYLE:
+- Natural, human, confident — like a senior strategist, not a form.
+- Short. One-line direct answer, then up to 4 tight bullets if useful, then optionally ONE question OR one clear next step.
+- Plain text only. No markdown symbols, no headings.
+- Be specific. Reference their topic or URL whenever possible. Avoid generic filler.
+
+HANDOFF:
+- If they ask about pricing, a quote, or a meeting, or sound urgent or frustrated: keep it short and offer a human handoff via WhatsApp or email.
 `.trim();
 
-  const userPrompt = `
-User message:
-${args.message || "(no message)"}
-
-If the user didn’t provide enough context, ask ONE question.
-If topic is "${play.label}" and the user is vague, default to this question:
-"${play.criticalQuestion}"
-`.trim();
+  // Only nudge the opener on the FIRST exchange — never re-inject later.
+  const openingHint = isOpening
+    ? `\n\nThis is the start of the conversation. If the user's goal isn't already clear from their message, a good opening question for the "${play.label}" topic is: "${play.openingQuestion}". Use it only if needed — do not ask it if they've already told you their goal.`
+    : `\n\nThis conversation is already in progress. Do NOT restart with goal-discovery questions. Continue from what has been established and push toward a concrete next step.`;
 
   const response = await openai.responses.create({
     model: "gpt-4.1-mini",
     input: [
-      { role: "system", content: systemPrompt },
-      ...history.map((m) => ({ role: m.role as any, content: cleanStr(m.content, 3000) })),
-      { role: "user", content: userPrompt },
+      { role: "system", content: systemPrompt + openingHint },
+      ...history.map((m) => ({
+        role: m.role as any,
+        content: cleanStr(m.content, 3000),
+      })),
+      // Pass the user's real message cleanly — no per-turn instruction wrapper.
+      { role: "user", content: args.message || "(no message)" },
     ],
   });
 
-  let reply = extractReplyText(response) || "Thanks! A member of the Digitalboxes team will follow up with you soon.";
+  let reply =
+    extractReplyText(response) ||
+    "Thanks! A member of the Digitalboxes team will follow up with you soon.";
 
-  // If escalation triggered, ensure we offer handoff in reply (without repeating greeting)
-  if (escalate && !reply.toLowerCase().includes("whatsapp") && !reply.toLowerCase().includes("email")) {
+  if (
+    escalate &&
+    !reply.toLowerCase().includes("whatsapp") &&
+    !reply.toLowerCase().includes("email")
+  ) {
     reply =
       reply +
-      "\n\nIf you want, I can hand this to a human right now.\n- WhatsApp or Email?\nWhich one do you prefer?";
+      "\n\nIf you want, I can hand this to a human right now — WhatsApp or email, whichever you prefer.";
   }
 
-  return { reply, suggestedReplies, escalate, reason: escalate ? "handoff_trigger" : undefined };
+  return {
+    reply,
+    suggestedReplies,
+    escalate,
+    reason: escalate ? "handoff_trigger" : undefined,
+  };
 }
 
 /* -------------------------- Main handler -------------------------- */
@@ -330,7 +355,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     const message = cleanStr(body.message, 4000);
     const pageUrl = body.pageUrl ? cleanStr(body.pageUrl, 2000) : undefined;
 
-    // Validation
     if (!lead.name || lead.name.trim().length < 2) {
       return res.status(400).json({ success: false, error: "Invalid name" });
     }
@@ -341,29 +365,37 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(400).json({ success: false, error: "Message is required" });
     }
 
-    // Fire-and-forget lead capture (sheet + email)
-    void sendLeadToSheet({
-      name: lead.name,
-      email: lead.email,
-      phone: lead.phone,
-      topic: lead.topic,
-      firstMessage: message,
-      pageUrl,
-    });
+    const history = Array.isArray(body.history) ? body.history : [];
 
-    void sendLeadEmail({
-      name: lead.name,
-      email: lead.email,
-      phone: lead.phone,
-      topic: lead.topic,
-      message,
-      pageUrl,
-    });
+    // Only push a lead to the sheet/email on the FIRST user message,
+    // so you don't create a new lead row (and email) on every single turn.
+    const isFirstUserMessage =
+      history.filter((m: any) => m?.role === "user").length <= 1;
+
+    if (isFirstUserMessage) {
+      void sendLeadToSheet({
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        topic: lead.topic,
+        firstMessage: message,
+        pageUrl,
+      });
+
+      void sendLeadEmail({
+        name: lead.name,
+        email: lead.email,
+        phone: lead.phone,
+        topic: lead.topic,
+        message,
+        pageUrl,
+      });
+    }
 
     const out = await generateJazzyReply({
       lead,
       message,
-      history: Array.isArray(body.history) ? body.history : [],
+      history,
       pageUrl,
     });
 
